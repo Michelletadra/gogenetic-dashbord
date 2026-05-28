@@ -333,7 +333,13 @@ def save_metas(ano: int, metas: dict):
 
 @st.cache_resource
 def get_clients() -> dict:
-    return {e["nome"]: EgestorClient(e["token"], e["nome"]) for e in EMPRESAS}
+    # Lê tokens em tempo de execução (não na importação) para garantir acesso ao st.secrets
+    empresas = [
+        {"nome": _secret("GOGENETIC_PESQUISA_NOME", "GoGenetic Pesquisa"), "token": _secret("GOGENETIC_PESQUISA_TOKEN")},
+        {"nome": _secret("GOGENETIC_SOLUCOES_NOME", "GoGenetic Soluções"), "token": _secret("GOGENETIC_SOLUCOES_TOKEN")},
+        {"nome": _secret("GOSOLOS_NOME", "GoSolos"),                        "token": _secret("GOSOLOS_TOKEN")},
+    ]
+    return {e["nome"]: EgestorClient(e["token"], e["nome"]) for e in empresas}
 
 
 @st.cache_data(ttl=300, show_spinner=False)
