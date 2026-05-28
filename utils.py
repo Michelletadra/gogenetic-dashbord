@@ -16,7 +16,7 @@ from egestor_api import EgestorClient
 _HASH = "$2b$12$lps5s0dBc/0dPNDuOHsKOesTq1zB/plaildClr3yVKJtTyiZAy20O"
 CREDENTIALS = {
     "usernames": {
-        "michelle": {"name": "Michelle Tadra",        "email": "michelle@gogeneti.com.br",       "password": _HASH},
+        "michelle": {"name": "Michelle Tadra",        "email": "michelle@gogenetic.com.br",      "password": _HASH},
         "neto":     {"name": "Silvino Souza Neto",    "email": "souza.neto@gogenetic.com.br",    "password": _HASH},
         "joseneis": {"name": "Joseneis Ribeiro Lima", "email": "jo@gogenetic.com.br",            "password": _HASH},
         "vania":    {"name": "Vânia Pankievicz",      "email": "vania@gogenetic.com.br",         "password": _HASH},
