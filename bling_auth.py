@@ -85,12 +85,39 @@ def _refresh(refresh_tok: str) -> dict:
 
 
 def _save(tokens: dict):
-    TOKEN_FILE.write_text(json.dumps(tokens, indent=2, ensure_ascii=False))
+    try:
+        TOKEN_FILE.write_text(json.dumps(tokens, indent=2, ensure_ascii=False))
+    except Exception:
+        pass
+    # Mantém em session_state para sobreviver reloads sem arquivo
+    try:
+        import streamlit as st
+        st.session_state["_bling_tokens"] = tokens
+    except Exception:
+        pass
 
 
 def load() -> dict:
+    # 1) session_state (mais fresco)
+    try:
+        import streamlit as st
+        if "_bling_tokens" in st.session_state:
+            return st.session_state["_bling_tokens"]
+    except Exception:
+        pass
+    # 2) arquivo local
     if TOKEN_FILE.exists():
-        return json.loads(TOKEN_FILE.read_text())
+        try:
+            return json.loads(TOKEN_FILE.read_text())
+        except Exception:
+            pass
+    # 3) secrets do Streamlit Cloud (tokens iniciais)
+    try:
+        import streamlit as st
+        if "bling_tokens" in st.secrets:
+            return dict(st.secrets["bling_tokens"])
+    except Exception:
+        pass
     return {}
 
 
