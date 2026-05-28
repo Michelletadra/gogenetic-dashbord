@@ -25,15 +25,16 @@ CREDENTIALS = {
     }
 }
 
-@st.cache_resource
 def get_authenticator() -> stauth.Authenticate:
-    return stauth.Authenticate(
-        CREDENTIALS,
-        cookie_name="gogenetic_auth",
-        cookie_key="gogenetic_secret_2026",
-        cookie_expiry_days=30,
-        auto_hash=False,
-    )
+    if "_authenticator" not in st.session_state:
+        st.session_state["_authenticator"] = stauth.Authenticate(
+            CREDENTIALS,
+            cookie_name="gogenetic_auth",
+            cookie_key="gogenetic_secret_2026",
+            cookie_expiry_days=30,
+            auto_hash=False,
+        )
+    return st.session_state["_authenticator"]
 
 def require_auth():
     """Para a execução da página se o usuário não estiver autenticado."""
