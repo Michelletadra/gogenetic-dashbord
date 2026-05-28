@@ -25,9 +25,14 @@ def _secret(key: str, default: str = "") -> str:
     except Exception:
         return default
 
-REDIRECT_URI  = _secret("BLING_REDIRECT_URI", "http://localhost:8501")
-CLIENT_ID     = _secret("BLING_CLIENT_ID", "")
-CLIENT_SECRET = _secret("BLING_CLIENT_SECRET", "")
+def _redirect_uri() -> str:
+    return _secret("BLING_REDIRECT_URI", "http://localhost:8501")
+
+def _client_id() -> str:
+    return _secret("BLING_CLIENT_ID", "")
+
+def _client_secret() -> str:
+    return _secret("BLING_CLIENT_SECRET", "")
 
 
 def get_auth_url() -> str:
@@ -35,14 +40,14 @@ def get_auth_url() -> str:
     return (
         f"{AUTH_URL}"
         f"?response_type=code"
-        f"&client_id={CLIENT_ID}"
+        f"&client_id={_client_id()}"
         f"&state=bling_dashboard"
-        f"&redirect_uri={REDIRECT_URI}"
+        f"&redirect_uri={_redirect_uri()}"
     )
 
 
 def _basic_auth() -> str:
-    credentials = f"{CLIENT_ID}:{CLIENT_SECRET}"
+    credentials = f"{_client_id()}:{_client_secret()}"
     return base64.b64encode(credentials.encode()).decode()
 
 
@@ -58,7 +63,7 @@ def exchange_code(code: str) -> dict:
         data={
             "grant_type":   "authorization_code",
             "code":         code,
-            "redirect_uri": REDIRECT_URI,
+            "redirect_uri": _redirect_uri(),
         },
         timeout=15,
     )
