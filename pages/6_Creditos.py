@@ -5,6 +5,7 @@ import plotly.express as px
 from datetime import date, timedelta
 
 from utils import GLOBAL_CSS, brl, status_badge, sidebar_header, require_auth
+from db_contratos import list_contratos as list_contratos_cliente
 from db_creditos import (
     list_clientes, insert_cliente, update_cliente, delete_cliente, resumo_cliente,
     list_notas, insert_nota, delete_nota,
@@ -173,7 +174,7 @@ with tab_clientes:
                 k3c.metric("Saldo válido",        brl(res.get("saldo_valido", 0)))
                 k4c.metric("Total utilizado",     brl(res.get("total_utilizado", 0)))
 
-                sub1, sub2, sub3 = st.tabs(["💳 Créditos", "📄 Notas Fiscais", "📋 Movimentações"])
+                sub1, sub2, sub3, sub4 = st.tabs(["💳 Créditos", "📄 Notas Fiscais", "📋 Movimentações", "📑 Contratos"])
 
                 with sub1:
                     creds = list_creditos(cliente_id=cli["id"])
@@ -253,6 +254,34 @@ with tab_clientes:
                         df_m["valor"] = df_m["valor"].apply(brl)
                         df_m.columns = ["Data","Tipo","Valor","Responsável","Observação"]
                         st.dataframe(df_m.fillna("—"), use_container_width=True, hide_index=True)
+
+                with sub4:
+                    cts = list_contratos_cliente(cliente_id=cli["id"])
+                    if not cts:
+                        st.info("Nenhum contrato vinculado a este cliente.")
+                        st.caption("Para vincular, edite um contrato na página 📑 Contratos.")
+                    else:
+                        hoje_c = pd.Timestamp.today().normalize()
+                        for ct in cts:
+                            venc_c = pd.to_datetime(ct["data_vencimento"], errors="coerce")
+                            dias_c = int((venc_c - hoje_c).days) if pd.notna(venc_c) else None
+                            cor_c  = "#EF4444" if (dias_c is not None and dias_c < 0) else \
+                                     "#F59E0B" if (dias_c is not None and dias_c <= 30) else "#10B981"
+                            venc_s = venc_c.strftime("%d/%m/%Y") if pd.notna(venc_c) else "—"
+                            st.markdown(f"""
+                            <div style='background:#fff;border-radius:8px;padding:12px 16px;
+                                        margin-bottom:8px;border-left:4px solid {cor_c};
+                                        box-shadow:0 1px 4px rgba(0,0,0,0.06)'>
+                              <div style='font-weight:700'>{ct['contratante']}
+                                <span style='font-size:.8rem;color:#8B6BAE;margin-left:8px'>{ct['empresa']}</span>
+                              </div>
+                              <div style='font-size:.85rem;color:#4B5563;margin-top:4px'>
+                                Valor: <b>{brl(ct['valor_total'])}</b> &nbsp;·&nbsp;
+                                Saldo: <b>{brl(ct['saldo'])}</b> &nbsp;·&nbsp;
+                                Vencimento: <b>{venc_s}</b>
+                                {f" · <b style='color:{cor_c}'>{dias_c}d</b>" if dias_c is not None else ""}
+                              </div>
+                            </div>""", unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 3 — CRÉDITOS
