@@ -6,6 +6,7 @@ bling_tokens.json
 # Dados sensíveis
 data/*.xlsx
 data/*.csv
+data/*.db
 
 # Python
 __pycache__/

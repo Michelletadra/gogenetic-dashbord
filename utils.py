@@ -255,6 +255,17 @@ def brl(value) -> str:
         return "R$ 0,00"
 
 
+def status_badge(status: str) -> str:
+    cores = {
+        "VÁLIDO":    ("#10B981", "#D1FAE5"),
+        "EXPIRADO":  ("#EF4444", "#FEE2E2"),
+        "UTILIZADO": ("#6B7280", "#F3F4F6"),
+        "CANCELADO": ("#F59E0B", "#FEF3C7"),
+    }
+    cor, bg = cores.get(status, ("#6B7280", "#F3F4F6"))
+    return f'<span style="background:{bg};color:{cor};padding:2px 10px;border-radius:12px;font-size:.8rem;font-weight:600">{status}</span>'
+
+
 def soma(items: list, campo: str) -> float:
     total = 0.0
     for it in items:
