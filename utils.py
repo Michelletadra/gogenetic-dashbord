@@ -25,6 +25,7 @@ CREDENTIALS = {
     }
 }
 
+@st.cache_resource
 def get_authenticator() -> stauth.Authenticate:
     return stauth.Authenticate(
         CREDENTIALS,
