@@ -4,7 +4,7 @@ from datetime import date
 from utils import (GLOBAL_CSS, ASSETS, BRAND, NOMES, TODOS_NOMES, NOME_YOU,
                    CHART_COLORS, brl, soma, kpi_card, plotly_layout,
                    get_clients, load_company_data, load_bling_data,
-                   sidebar_header)
+                   sidebar_header, get_authenticator)
 import bling_auth
 
 st.set_page_config(
@@ -14,6 +14,22 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
+
+# ── Autenticação ───────────────────────────────────────────────────────────────
+authenticator = get_authenticator()
+authenticator.login(location="main")
+
+if st.session_state.get("authentication_status") is False:
+    st.error("❌ Usuário ou senha incorretos.")
+    st.stop()
+elif st.session_state.get("authentication_status") is None:
+    st.markdown("""
+    <div style='text-align:center;margin-top:40px'>
+        <img src='https://raw.githubusercontent.com/Michelletadra/gogenetic-dashbord/main/assets/logo_gg.png' width='200'><br><br>
+        <p style='color:#7E16B8;font-size:1.1rem;font-weight:600'>Dashboard Financeiro · Grupo GoGenetic</p>
+    </div>
+    """, unsafe_allow_html=True)
+    st.stop()
 
 # ── OAuth2 Bling — captura o código de retorno ─────────────────────────────────
 params = st.query_params

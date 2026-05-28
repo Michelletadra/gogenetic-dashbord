@@ -7,9 +7,38 @@ from typing import Optional
 
 import plotly.graph_objects as go
 import streamlit as st
+import streamlit_authenticator as stauth
 from dotenv import load_dotenv
 
 from egestor_api import EgestorClient
+
+# ── Credenciais de acesso ─────────────────────────────────────────────────────
+_HASH = "$2b$12$lps5s0dBc/0dPNDuOHsKOesTq1zB/plaildClr3yVKJtTyiZAy20O"
+CREDENTIALS = {
+    "usernames": {
+        "michelle": {"name": "Michelle", "password": _HASH},
+        "neto":     {"name": "Neto",     "password": _HASH},
+        "joseneis": {"name": "Joseneis", "password": _HASH},
+        "vania":    {"name": "Vania",    "password": _HASH},
+        "eduardo":  {"name": "Eduardo",  "password": _HASH},
+        "amanda":   {"name": "Amanda",   "password": _HASH},
+    }
+}
+
+def get_authenticator() -> stauth.Authenticate:
+    return stauth.Authenticate(
+        CREDENTIALS,
+        cookie_name="gogenetic_auth",
+        cookie_key="gogenetic_secret_2026",
+        cookie_expiry_days=30,
+        auto_hash=False,
+    )
+
+def require_auth():
+    """Para a execução da página se o usuário não estiver autenticado."""
+    if not st.session_state.get("authentication_status"):
+        st.error("🔒 Faça login na página inicial para acessar o dashboard.")
+        st.stop()
 
 load_dotenv()
 
@@ -260,6 +289,7 @@ def kpi_card(col, icon: str, label: str, value: str, sub: str = "", border: str 
 
 
 def sidebar_header(logo_path: Optional[str] = None):
+    require_auth()
     with st.sidebar:
         if logo_path:
             st.image(logo_path, use_column_width=True)
@@ -269,6 +299,9 @@ def sidebar_header(logo_path: Optional[str] = None):
             "<hr style='border:none;border-top:1px solid rgba(126,22,184,0.2);margin:12px 0 16px 0'>",
             unsafe_allow_html=True,
         )
+        nome = st.session_state.get("name", "")
+        st.caption(f"👤 {nome}")
+        get_authenticator().logout("Sair", location="sidebar")
 
 
 def sidebar_empresa_periodo(show_periodo: bool = True):
