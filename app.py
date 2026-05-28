@@ -63,8 +63,7 @@ with st.sidebar:
     else:
         st.warning("⚠️ Não conectada")
         auth_url = bling_auth.get_auth_url()
-        st.markdown(f'<a href="{auth_url}" target="_top"><button style="width:100%;background:#13CFE8;color:#190E33;border:none;padding:8px;border-radius:6px;cursor:pointer;font-weight:700">🔗 Conectar ao Bling</button></a>',
-                    unsafe_allow_html=True)
+        st.link_button("🔗 Conectar ao Bling", auth_url, use_container_width=True)
     st.markdown("---")
     st.caption("Navegue pelas páginas no menu acima ↑")
 
