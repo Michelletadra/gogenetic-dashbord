@@ -16,12 +16,12 @@ from egestor_api import EgestorClient
 _HASH = "$2b$12$lps5s0dBc/0dPNDuOHsKOesTq1zB/plaildClr3yVKJtTyiZAy20O"
 CREDENTIALS = {
     "usernames": {
-        "michelle": {"name": "Michelle", "password": _HASH},
-        "neto":     {"name": "Neto",     "password": _HASH},
-        "joseneis": {"name": "Joseneis", "password": _HASH},
-        "vania":    {"name": "Vania",    "password": _HASH},
-        "eduardo":  {"name": "Eduardo",  "password": _HASH},
-        "amanda":   {"name": "Amanda",   "password": _HASH},
+        "michelle": {"name": "Michelle Tadra",        "email": "michelle@gogeneti.com.br",       "password": _HASH},
+        "neto":     {"name": "Silvino Souza Neto",    "email": "souza.neto@gogenetic.com.br",    "password": _HASH},
+        "joseneis": {"name": "Joseneis Ribeiro Lima", "email": "jo@gogenetic.com.br",            "password": _HASH},
+        "vania":    {"name": "Vânia Pankievicz",      "email": "vania@gogenetic.com.br",         "password": _HASH},
+        "eduardo":  {"name": "Eduardo Balsanelli",    "email": "balsanelli@gogenetic.com.br",    "password": _HASH},
+        "amanda":   {"name": "Amanda Mara S. Souza",  "email": "amanda@gogenetic.com.br",        "password": _HASH},
     }
 }
 
