@@ -15,9 +15,19 @@ load_dotenv()
 TOKEN_FILE    = Path(__file__).parent / "bling_tokens.json"
 AUTH_URL      = "https://www.bling.com.br/Api/v3/oauth/authorize"
 TOKEN_URL     = "https://www.bling.com.br/Api/v3/oauth/token"
-REDIRECT_URI  = os.getenv("BLING_REDIRECT_URI", "http://localhost:8501")
-CLIENT_ID     = os.getenv("BLING_CLIENT_ID", "")
-CLIENT_SECRET = os.getenv("BLING_CLIENT_SECRET", "")
+def _secret(key: str, default: str = "") -> str:
+    val = os.getenv(key)
+    if val:
+        return val
+    try:
+        import streamlit as st
+        return st.secrets[key]
+    except Exception:
+        return default
+
+REDIRECT_URI  = _secret("BLING_REDIRECT_URI", "http://localhost:8501")
+CLIENT_ID     = _secret("BLING_CLIENT_ID", "")
+CLIENT_SECRET = _secret("BLING_CLIENT_SECRET", "")
 
 
 def get_auth_url() -> str:

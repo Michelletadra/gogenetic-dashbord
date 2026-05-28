@@ -13,6 +13,16 @@ from egestor_api import EgestorClient
 
 load_dotenv()
 
+def _secret(key: str, default: str = "") -> str:
+    """Lê do .env local ou dos secrets do Streamlit Cloud."""
+    val = os.getenv(key)
+    if val:
+        return val
+    try:
+        return st.secrets[key]
+    except Exception:
+        return default
+
 ASSETS   = Path(__file__).parent / "assets"
 METAS_FILE = Path(__file__).parent / "metas.json"
 
@@ -54,11 +64,11 @@ BRAND = {
 }
 
 EMPRESAS_EGESTOR = [
-    {"nome": os.getenv("GOGENETIC_PESQUISA_NOME", "GoGenetic Pesquisa"), "token": os.getenv("GOGENETIC_PESQUISA_TOKEN")},
-    {"nome": os.getenv("GOGENETIC_SOLUCOES_NOME", "GoGenetic Soluções"), "token": os.getenv("GOGENETIC_SOLUCOES_TOKEN")},
-    {"nome": os.getenv("GOSOLOS_NOME", "GoSolos"),                        "token": os.getenv("GOSOLOS_TOKEN")},
+    {"nome": _secret("GOGENETIC_PESQUISA_NOME", "GoGenetic Pesquisa"), "token": _secret("GOGENETIC_PESQUISA_TOKEN")},
+    {"nome": _secret("GOGENETIC_SOLUCOES_NOME", "GoGenetic Soluções"), "token": _secret("GOGENETIC_SOLUCOES_TOKEN")},
+    {"nome": _secret("GOSOLOS_NOME", "GoSolos"),                        "token": _secret("GOSOLOS_TOKEN")},
 ]
-NOME_YOU     = os.getenv("GOGENETIC_YOU_NOME", "GoGenetic You")
+NOME_YOU     = _secret("GOGENETIC_YOU_NOME", "GoGenetic You")
 EMPRESAS     = EMPRESAS_EGESTOR  # eGestor only (You é carregado separado via Bling)
 NOMES        = [e["nome"] for e in EMPRESAS_EGESTOR]
 TODOS_NOMES  = NOMES + [NOME_YOU]
