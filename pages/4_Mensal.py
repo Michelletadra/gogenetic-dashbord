@@ -100,7 +100,7 @@ def delta_str(var):
 kpi_card(c1, "🛒", "Vendas",        brl(total_v),   delta_str(var_v),
          value_class="kpi-positive" if (var_v or 0) >= 0 else "kpi-negative")
 kpi_card(c2, "🎯", "Ticket Médio",  brl(ticket),    f"{len(vendas)} pedidos")
-kpi_card(c3, "💰", "Faturado",      brl(total_f),   delta_str(var_f),
+kpi_card(c3, "💰", "Recebido",      brl(total_f),   delta_str(var_f),
          value_class="kpi-positive" if (var_f or 0) >= 0 else "kpi-negative")
 kpi_card(c4, "📥", "A Receber",     brl(total_r),   f"{len(rec)} títulos",  border="rgba(36,183,140,0.3)")
 kpi_card(c5, "📤", "A Pagar",       brl(total_p),   f"{len(pag)} títulos",  border="rgba(255,103,47,0.3)")
@@ -211,7 +211,7 @@ with tab_fin:
 
     with col_a:
         # Gráfico comparativo de vendas e faturamento: este ano vs ano anterior
-        categorias = ["Vendas", "Faturado"]
+        categorias = ["Vendas", "Recebido"]
         vals_atual = [total_v, total_f]
         vals_ant   = [total_v_ant, total_f_ant]
 
@@ -262,7 +262,7 @@ with tab_fin:
 
         rows = [
             {"Indicador": "Vendas",        f"{ano}": brl(total_v),   f"{ano-1}": brl(total_v_ant), "Variação": fmt_var(total_v, total_v_ant)},
-            {"Indicador": "Faturado",      f"{ano}": brl(total_f),   f"{ano-1}": brl(total_f_ant), "Variação": fmt_var(total_f, total_f_ant)},
+            {"Indicador": "Recebido",      f"{ano}": brl(total_f),   f"{ano-1}": brl(total_f_ant), "Variação": fmt_var(total_f, total_f_ant)},
             {"Indicador": "Ticket Médio",  f"{ano}": brl(ticket),    f"{ano-1}": brl(soma(vendas_ant, "valorTotal") / len(vendas_ant) if vendas_ant else 0), "Variação": "—"},
             {"Indicador": "A Receber",     f"{ano}": brl(total_r),   f"{ano-1}": "—", "Variação": "—"},
             {"Indicador": "A Pagar",       f"{ano}": brl(total_p),   f"{ano-1}": "—", "Variação": "—"},

@@ -96,7 +96,7 @@ st.markdown(f"""
 
 # ── KPIs ───────────────────────────────────────────────────────────────────────
 c1, c2, c3, c4, c5 = st.columns(5)
-kpi_card(c1, "💰", f"Faturado {ano}",  brl(total_fat), f"meta anual: {brl(total_meta)}")
+kpi_card(c1, "💰", f"Recebido {ano}",  brl(total_fat), f"meta anual: {brl(total_meta)}")
 kpi_card(c2, "🎯", "% Meta Anual",    f"{pct_geral:.1f}%", "",
          value_class="kpi-positive" if pct_geral >= 100 else ("kpi-warn" if pct_geral >= 70 else "kpi-negative"))
 kpi_card(c3, "📅", "Acumulado",       brl(fat_acum), f"meta: {brl(meta_acum)}" if mes_corte > 0 else "—")
