@@ -109,18 +109,16 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # ── KPIs ───────────────────────────────────────────────────────────────────────
-em_exec    = [s for s in todos if s.get("situacaoOS") == "Em execução"]
-aprovados  = [s for s in todos if s.get("situacaoOS") == "Aprovado"]
-a_faturar  = [s for s in todos if s.get("situacaoOS") == "Faturar"]
-em_espera  = [s for s in todos if s.get("situacaoOS") == "Em espera"]
-nf_emitida = [s for s in todos if s.get("situacaoOS") == "NF Emitida"]
+em_exec   = [s for s in todos if s.get("situacaoOS") == "Em execução"]
+aprovados = [s for s in todos if s.get("situacaoOS") == "Aprovado"]
+a_faturar = [s for s in todos if s.get("situacaoOS") == "Faturar"]
+em_espera = [s for s in todos if s.get("situacaoOS") == "Em espera"]
 
-c1, c2, c3, c4, c5 = st.columns(5)
-kpi_card(c1, "⚡", "Em Execução",   brl(soma(em_exec,   "valorTotal")), f"{len(em_exec)} serviços",   border="#7E16B8")
-kpi_card(c2, "✅", "Aprovados",     brl(soma(aprovados, "valorTotal")), f"{len(aprovados)} serviços", border="#10B981")
-kpi_card(c3, "💰", "A Faturar",     brl(soma(a_faturar, "valorTotal")), f"{len(a_faturar)} serviços", border="#3B82F6")
-kpi_card(c4, "⏳", "Em Espera",     brl(soma(em_espera, "valorTotal")), f"{len(em_espera)} serviços", border="#F59E0B")
-kpi_card(c5, "🧾", "NF Emitida",   brl(soma(nf_emitida,"valorTotal")), f"{len(nf_emitida)} serviços", border="#6B7280")
+c1, c2, c3, c4 = st.columns(4)
+kpi_card(c1, "⚡", "Em Execução", brl(soma(em_exec,   "valorTotal")), f"{len(em_exec)} serviços",   border="#7E16B8")
+kpi_card(c2, "✅", "Aprovados",   brl(soma(aprovados, "valorTotal")), f"{len(aprovados)} serviços", border="#10B981")
+kpi_card(c3, "💰", "A Faturar",   brl(soma(a_faturar, "valorTotal")), f"{len(a_faturar)} serviços", border="#3B82F6")
+kpi_card(c4, "⏳", "Em Espera",   brl(soma(em_espera, "valorTotal")), f"{len(em_espera)} serviços", border="#F59E0B")
 
 # ── Gráficos ───────────────────────────────────────────────────────────────────
 if filtrados:
