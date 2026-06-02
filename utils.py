@@ -22,6 +22,7 @@ CREDENTIALS = {
         "vania":    {"name": "Vânia Pankievicz",      "email": "vania@gogenetic.com.br",         "password": _HASH},
         "eduardo":  {"name": "Eduardo Balsanelli",    "email": "balsanelli@gogenetic.com.br",    "password": _HASH},
         "amanda":   {"name": "Amanda Mara S. Souza",  "email": "amanda@gogenetic.com.br",        "password": _HASH},
+        "hirwigy":  {"name": "Hirwigy",               "email": "hirwigy@gogenetic.com.br",       "password": _HASH},
     }
 }
 
