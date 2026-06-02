@@ -3,10 +3,18 @@ import os
 from datetime import date
 from supabase import create_client
 
+def _secret(key: str) -> str:
+    val = os.getenv(key, "")
+    if not val:
+        try:
+            import streamlit as st
+            val = st.secrets.get(key, "")
+        except Exception:
+            pass
+    return val
+
 def _sb():
-    url = os.getenv("SUPABASE_URL", "")
-    key = os.getenv("SUPABASE_KEY", "")
-    return create_client(url, key)
+    return create_client(_secret("SUPABASE_URL"), _secret("SUPABASE_KEY"))
 
 # ── Status automático ─────────────────────────────────────────────────────────
 def compute_status(data_termino, renovacao_automatica, status_manual="ATIVO"):

@@ -1,16 +1,30 @@
-"""Roteador de banco — contratos (SQLite local ou Supabase na nuvem).
-Auto-detecta Supabase quando SUPABASE_URL estiver configurado.
-"""
+"""Roteador de banco — contratos (SQLite local ou Supabase na nuvem)."""
 import os
 from dotenv import load_dotenv
 load_dotenv()
 
-_backend = os.getenv("DB_BACKEND", "sqlite")
-# Auto-usa Supabase se a URL estiver disponível (Streamlit Cloud secrets)
-if _backend == "sqlite" and os.getenv("SUPABASE_URL"):
-    _backend = "supabase"
+def _get_backend() -> str:
+    # 1. variável de ambiente (.env local)
+    val = os.getenv("DB_BACKEND", "")
+    if val:
+        return val
+    # 2. Streamlit secrets (Streamlit Cloud)
+    try:
+        import streamlit as st
+        val = st.secrets.get("DB_BACKEND", "")
+        if val:
+            return val
+        # Se SUPABASE_URL estiver nos secrets, usa Supabase
+        if st.secrets.get("SUPABASE_URL"):
+            return "supabase"
+    except Exception:
+        pass
+    # 3. Se SUPABASE_URL estiver no env, usa Supabase
+    if os.getenv("SUPABASE_URL"):
+        return "supabase"
+    return "sqlite"
 
-if _backend == "supabase":
+if _get_backend() == "supabase":
     from db_contratos_supabase import *
 else:
     from db_contratos_sqlite import *
