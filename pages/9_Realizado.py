@@ -142,23 +142,14 @@ st.markdown(
 )
 
 # ── Carregar dados ────────────────────────────────────────────────────────────
+# Estratégia: carrega apenas os 12 meses (cache 1h) e filtra em memória.
+# Só faz chamada extra para o mês atual (cache 5 min) e períodos > 12 meses.
+_doze_ini_str = (today - timedelta(days=365)).strftime("%Y-%m-%d")
+_periodo_antigo = dt_ini_str < _doze_ini_str   # período selecionado fora dos 12m
+
 with st.spinner("Carregando realizados..."):
 
-    # — eGestor —
-    periodo_raw: list[dict] = []
-    for nome in empresas_egestor:
-        rows = load_pagamentos_realizados(nome, dt_ini_str, dt_fim_str)
-        for r in rows:
-            r["_empresa"] = nome
-        periodo_raw.extend(rows)
-
-    mes_raw: list[dict] = []
-    for nome in empresas_egestor:
-        rows = load_pagamentos_realizados(nome, mes_ini_str, hoje_str)
-        for r in rows:
-            r["_empresa"] = nome
-        mes_raw.extend(rows)
-
+    # — 12 meses (sempre carregado; cache 1h) —
     doze_raw: list[dict] = []
     for nome in empresas_egestor:
         rows = load_realizados_12m(nome)
@@ -166,18 +157,50 @@ with st.spinner("Carregando realizados..."):
             r["_empresa"] = nome
         doze_raw.extend(rows)
 
-    # — Bling (GoGenetic You) —
     if inclui_bling:
-        for raw_list, loader_result in [
-            (periodo_raw, load_bling_pagamentos_realizados(dt_ini_str, dt_fim_str)),
-            (mes_raw,     load_bling_pagamentos_realizados(mes_ini_str, hoje_str)),
-            (doze_raw,    load_bling_realizados_12m()),
-        ]:
-            for r in loader_result:
-                r["_empresa"] = NOME_YOU
-            raw_list.extend(loader_result)
+        for r in load_bling_realizados_12m():
+            r["_empresa"] = NOME_YOU
+            doze_raw.append(r)
 
-    # — Plano de contas eGestor (para lookup de hierarquia) —
+    # — Período selecionado: filtra dos 12m ou faz chamada para datas antigas —
+    if _periodo_antigo:
+        periodo_raw: list[dict] = []
+        for nome in empresas_egestor:
+            rows = load_pagamentos_realizados(nome, dt_ini_str, dt_fim_str)
+            for r in rows:
+                r["_empresa"] = nome
+            periodo_raw.extend(rows)
+        if inclui_bling:
+            for r in load_bling_pagamentos_realizados(dt_ini_str, dt_fim_str):
+                r["_empresa"] = NOME_YOU
+                periodo_raw.append(r)
+    else:
+        # Filtra em memória a partir dos 12m — zero chamadas extras
+        periodo_raw = [
+            r for r in doze_raw
+            if dt_ini_str <= (r.get("dtPgto") or "")[:10] <= dt_fim_str
+        ]
+
+    # — Mês atual para KPIs granulares (hoje/semana/mês): cache 5 min —
+    if _is_mes_atual:
+        mes_raw: list[dict] = []
+        for nome in empresas_egestor:
+            rows = load_pagamentos_realizados(nome, mes_ini_str, hoje_str)
+            for r in rows:
+                r["_empresa"] = nome
+            mes_raw.extend(rows)
+        if inclui_bling:
+            for r in load_bling_pagamentos_realizados(mes_ini_str, hoje_str):
+                r["_empresa"] = NOME_YOU
+                mes_raw.append(r)
+    else:
+        # KPI de mês atual também vem dos 12m (ok — diferença máx. 1h)
+        mes_raw = [
+            r for r in doze_raw
+            if mes_ini_str <= (r.get("dtPgto") or "")[:10] <= hoje_str
+        ]
+
+    # — Plano de contas eGestor (cache 1h) —
     plano_raw = load_plano_contas(empresas_egestor[0]) if empresas_egestor else []
 
 
@@ -285,12 +308,16 @@ else:
 
     ant_ini = dt_ini - timedelta(days=dias_periodo)
     ant_fim = dt_ini - timedelta(days=1)
-    ant_raw: list[dict] = []
-    for nome in empresas_ativas:
-        rows = load_pagamentos_realizados(nome, ant_ini.strftime("%Y-%m-%d"), ant_fim.strftime("%Y-%m-%d"))
-        for r in rows:
-            r["_empresa"] = nome
-        ant_raw.extend(rows)
+    ant_ini_str = ant_ini.strftime("%Y-%m-%d")
+    ant_fim_str = ant_fim.strftime("%Y-%m-%d")
+    # Deriva comparativo dos 12m (sem API extra); só busca se mais antigo
+    if ant_ini_str >= _doze_ini_str:
+        ant_raw = [
+            r for r in doze_raw
+            if ant_ini_str <= (r.get("dtPgto") or "")[:10] <= ant_fim_str
+        ]
+    else:
+        ant_raw = []   # período muito antigo — omite comparativo
     val_ant = float(sum(float(r.get("valor") or 0) for r in ant_raw))
 
     if val_ant > 0:
