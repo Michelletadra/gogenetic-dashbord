@@ -210,37 +210,37 @@ else:
         "valorTotal":        "Valor",
     }
 
-    STATUS_ESPERA     = ["Em espera"]
-    STATUS_CONCLUIDO  = ["NF Emitida", "Cotação", "Proposta"]
-    STATUS_ATIVOS_TAB = ["Em execução", "Aprovado", "Faturar", "Consumo de crédito"]
-
-    # "Em execução": mais antigos primeiro (maior prazo em execução no topo)
-    # Demais ativos: mais recentes primeiro
-    df_show_dt = pd.DataFrame(filtrados)
-    df_show_dt["valorTotal"]   = pd.to_numeric(df_show_dt["valorTotal"], errors="coerce").fillna(0)
-    df_show_dt["dtVenda_sort"] = pd.to_datetime(df_show_dt["dtVenda"], errors="coerce")
-    df_show_dt["situacaoOS"]   = df_show_dt["situacaoOS"].fillna("—")
-    df_show_dt["nomeContato"]  = df_show_dt["nomeContato"].fillna("—")
-    df_show_dt["nomeVendedor"] = df_show_dt.get("nomeVendedor", pd.Series(dtype=str)).fillna("—")
-
-    em_exec_df   = df_show_dt[df_show_dt["situacaoOS"] == "Em execução"].sort_values("dtVenda_sort", ascending=True)
-    outros_at_df = df_show_dt[df_show_dt["situacaoOS"].isin(["Aprovado", "Faturar", "Consumo de crédito"])].sort_values("dtVenda_sort", ascending=False)
-    df_ativos_ord = pd.concat([em_exec_df, outros_at_df], ignore_index=True)
-
-    # Formata coluna de data e dias em execução
-    df_ativos_ord["Dias em execução"] = (
-        pd.Timestamp.today().normalize() - df_ativos_ord["dtVenda_sort"]
+    # ── Prepara base com coluna de dias e sort ────────────────────────────────
+    df_base = pd.DataFrame(filtrados)
+    df_base["valorTotal"]   = pd.to_numeric(df_base["valorTotal"], errors="coerce").fillna(0)
+    df_base["dtVenda_sort"] = pd.to_datetime(df_base["dtVenda"], errors="coerce")
+    df_base["situacaoOS"]   = df_base["situacaoOS"].fillna("—")
+    df_base["nomeContato"]  = df_base["nomeContato"].fillna("—")
+    df_base["nomeVendedor"] = df_base.get("nomeVendedor", pd.Series(dtype=str)).fillna("—")
+    df_base["Dias em execução"] = (
+        pd.Timestamp.today().normalize() - df_base["dtVenda_sort"]
     ).dt.days.fillna(0).astype(int)
-    df_ativos_ord["dtVenda"] = df_ativos_ord["dtVenda_sort"].dt.strftime("%d/%m/%Y")
+    df_base["dtVenda"] = df_base["dtVenda_sort"].dt.strftime("%d/%m/%Y")
 
-    df_tab_ativos    = df_ativos_ord
-    df_tab_espera    = df_show[df_show["situacaoOS"].isin(STATUS_ESPERA)]
-    df_tab_concluido = df_show[df_show["situacaoOS"].isin(STATUS_CONCLUIDO)]
+    def _filtro(status, asc=False):
+        df_f = df_base[df_base["situacaoOS"].isin(status) if isinstance(status, list)
+                       else df_base["situacaoOS"] == status]
+        return df_f.sort_values("dtVenda_sort", ascending=asc)
 
-    tab_at, tab_esp, tab_conc = st.tabs([
-        f"⚡ Ativos ({len(df_tab_ativos)})",
-        f"⏳ Em Espera ({len(df_tab_espera)})",
-        f"🧾 Concluídos / Outros ({len(df_tab_concluido)})",
+    df_exec     = _filtro("Em execução",       asc=True)   # mais antigos primeiro
+    df_aprov    = _filtro("Aprovado",           asc=False)
+    df_faturar  = _filtro("Faturar",            asc=False)
+    df_credito  = _filtro("Consumo de crédito", asc=False)
+    df_espera   = _filtro("Em espera",          asc=False)
+    df_concluido = _filtro(["NF Emitida", "Cotação", "Proposta"], asc=False)
+
+    tab_exec, tab_aprov, tab_fat, tab_cred, tab_esp, tab_conc = st.tabs([
+        f"⚡ Em Execução ({len(df_exec)})",
+        f"✅ Aprovados ({len(df_aprov)})",
+        f"💰 A Faturar ({len(df_faturar)})",
+        f"🎯 Consumo Crédito ({len(df_credito)})",
+        f"⏳ Em Espera ({len(df_espera)})",
+        f"🧾 Concluídos / Outros ({len(df_concluido)})",
     ])
 
     def tabela_servico(df_t: pd.DataFrame, key_suffix: str):
@@ -302,11 +302,20 @@ else:
                 key=f"dl_{key_suffix}",
             )
 
-    with tab_at:
-        tabela_servico(df_tab_ativos, "ativos")
+    with tab_exec:
+        tabela_servico(df_exec, "execucao")
+
+    with tab_aprov:
+        tabela_servico(df_aprov, "aprovados")
+
+    with tab_fat:
+        tabela_servico(df_faturar, "faturar")
+
+    with tab_cred:
+        tabela_servico(df_credito, "credito")
 
     with tab_esp:
-        tabela_servico(df_tab_espera, "espera")
+        tabela_servico(df_espera, "espera")
 
     with tab_conc:
-        tabela_servico(df_tab_concluido, "concluidos")
+        tabela_servico(df_concluido, "concluidos")
