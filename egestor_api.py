@@ -141,6 +141,20 @@ class EgestorClient:
             "orderBy": "dtVenda,desc",
         })
 
+    def get_pagamentos_realizados(self, dt_ini: str, dt_fim: str) -> list:
+        """Pagamentos efetivamente pagos (situFin=30), ordenados por dtPgto."""
+        return self._get_all_pages("pagamentos", {
+            "situFin": 30,
+            "dtTipo": "dtPgto",
+            "dtIni": dt_ini,
+            "dtFim": dt_fim,
+            "fields": "codigo,descricao,valor,dtPgto,dtVenc,nomeContato,situacao,codPlanoContas,origem",
+        })
+
+    def get_plano_contas(self) -> list:
+        """Retorna todos os registros do plano de contas."""
+        return self._get_all_pages("planoContas", {})
+
     def get_vendas_12m(self) -> list:
         from datetime import date
         dt_fim = date.today()

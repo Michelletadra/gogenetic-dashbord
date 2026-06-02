@@ -529,3 +529,74 @@ def load_vencidas_unificado(nome: str) -> dict:
     if nome == NOME_YOU:
         return load_bling_vencidas()
     return load_vencidas(nome)
+
+
+# ── Realizado (despesas pagas) ────────────────────────────────────────────────
+
+@st.cache_data(ttl=300, show_spinner=False)
+def load_pagamentos_realizados(nome: str, dt_ini: str, dt_fim: str) -> list:
+    """Carrega pagamentos efetivamente pagos (situFin=30) de uma empresa eGestor."""
+    client = get_clients().get(nome)
+    if not client:
+        return []
+    try:
+        return client.get_pagamentos_realizados(dt_ini, dt_fim)
+    except Exception as exc:
+        st.error(f"Erro ao carregar realizados de {nome}: {exc}")
+        return []
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def load_realizados_12m(nome: str) -> list:
+    """Carrega realizados dos últimos 12 meses (cache 1h)."""
+    from datetime import date
+    dt_fim = date.today()
+    dt_ini = dt_fim.replace(year=dt_fim.year - 1)
+    client = get_clients().get(nome)
+    if not client:
+        return []
+    try:
+        return client.get_pagamentos_realizados(
+            dt_ini.strftime("%Y-%m-%d"), dt_fim.strftime("%Y-%m-%d")
+        )
+    except Exception:
+        return []
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def load_bling_pagamentos_realizados(dt_ini: str, dt_fim: str) -> list:
+    """Contas a pagar pagas do Bling, filtradas por data de pagamento."""
+    client = get_bling_client()
+    if not client:
+        return []
+    try:
+        from bling_api import BlingClient
+        raw = client.get_pagamentos_realizados(dt_ini, dt_fim)
+        return [BlingClient.normaliza_pagamento_realizado(r) for r in raw]
+    except Exception as exc:
+        import streamlit as _st
+        _st.error(f"Erro Bling realizados: {exc}")
+        return []
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def load_bling_realizados_12m() -> list:
+    """Realizados Bling dos últimos 12 meses (cache 1h)."""
+    from datetime import date
+    dt_fim = date.today()
+    dt_ini = dt_fim.replace(year=dt_fim.year - 1)
+    return load_bling_pagamentos_realizados(
+        dt_ini.strftime("%Y-%m-%d"), dt_fim.strftime("%Y-%m-%d")
+    )
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def load_plano_contas(nome: str) -> list:
+    """Carrega plano de contas de uma empresa eGestor (cache 1h)."""
+    client = get_clients().get(nome)
+    if not client:
+        return []
+    try:
+        return client.get_plano_contas()
+    except Exception:
+        return []

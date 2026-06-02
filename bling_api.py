@@ -89,6 +89,14 @@ class BlingClient:
             "situacoes[]":           2,   # 2=Recebida
         })
 
+    def get_pagamentos_realizados(self, dt_ini: str, dt_fim: str) -> list:
+        """Contas a pagar já pagas, filtradas por data de pagamento."""
+        return self._get_all_pages("contas/pagar", {
+            "dataPagamentoInicial": dt_ini,
+            "dataPagamentoFinal":   dt_fim,
+            "situacoes[]":          2,    # 2=Pago
+        })
+
     def get_vencidas_receber(self) -> list:
         ontem = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
         return self._get_all_pages("contas/receber", {
@@ -132,4 +140,25 @@ class BlingClient:
             "dtPgto":      item.get("dataPagamento", ""),
             "nomeContato": contato.get("nome", ""),
             "situacao":    item.get("situacao", {}).get("id", 0) if isinstance(item.get("situacao"), dict) else item.get("situacao", 0),
+        }
+
+    @staticmethod
+    def normaliza_pagamento_realizado(item: dict) -> dict:
+        """Converte conta/pagar paga do Bling para o formato do Realizado.
+        Usa categoria como grupo/subgrupo (Bling não tem hierarquia de plano de contas).
+        """
+        contato   = item.get("contato") or {}
+        categoria = item.get("categoria") or {}
+        cat_nome  = categoria.get("descricao") or "Sem Categoria"
+        return {
+            "codigo":       item.get("id", ""),
+            "descricao":    item.get("descricao") or item.get("historico", ""),
+            "valor":        item.get("valor", 0),
+            "dtPgto":       item.get("dataPagamento", ""),
+            "dtVenc":       item.get("vencimento") or "",
+            "nomeContato":  contato.get("nome", ""),
+            "situacao":     2,           # pago
+            # campos especiais para o Realizado (bypass do plano de contas eGestor)
+            "_grupo_bling":    cat_nome,
+            "_subgrupo_bling": cat_nome,
         }
