@@ -362,20 +362,59 @@ with tab_creditos:
                 label   = st.selectbox("Crédito *", list(opts.keys()))
                 cr      = opts[label]
                 saldo_d = (cr["valor_original"] or 0) - (cr["valor_utilizado"] or 0)
-                c1, c2  = st.columns(2)
-                v_uso   = c1.number_input("Valor consumido *", min_value=0.01,
-                                           max_value=float(saldo_d), step=0.01, format="%.2f")
-                resp    = c2.text_input("Responsável")
-                obs_u   = st.text_area("Observação")
+
+                st.markdown(f"**Saldo disponível: {brl(saldo_d)}**")
+                st.markdown("---")
+
+                # Detalhes do serviço (como na planilha)
+                ca, cb = st.columns(2)
+                desc_serv    = ca.text_input("Descrição do serviço *", placeholder="ex: Microbioma 1 alvo")
+                cod_serv     = cb.text_input("Código do serviço", placeholder="ex: S5990")
+
+                cc, cd, ce = st.columns(3)
+                qtd_am       = cc.number_input("Qtd amostras", min_value=0, step=1, value=0)
+                vl_am        = cd.number_input("Valor / amostra (R$)", min_value=0.0, step=0.01, format="%.2f", value=0.0)
+                data_serv    = ce.date_input("Data do serviço", value=date.today())
+
+                # Calcula total automaticamente
+                total_calc = qtd_am * vl_am if qtd_am > 0 and vl_am > 0 else 0.0
+                if total_calc > 0:
+                    st.info(f"💡 Total calculado: **{brl(total_calc)}** ({qtd_am} amostras × {brl(vl_am)})")
+                    v_uso_default = min(total_calc, saldo_d)
+                else:
+                    v_uso_default = 0.01
+
+                cf, cg = st.columns(2)
+                v_uso = cf.number_input(
+                    "Valor total consumido (R$) *",
+                    min_value=0.01, max_value=float(saldo_d),
+                    step=0.01, format="%.2f",
+                    value=float(min(v_uso_default, saldo_d)) if v_uso_default > 0 else 0.01,
+                )
+                resp  = cg.text_input("Responsável")
+                obs_u = st.text_area("Observação", height=60)
+
                 if st.form_submit_button("💸 Registrar Consumo", use_container_width=True):
-                    novo_ut = (cr["valor_utilizado"] or 0) + v_uso
-                    novo_st = "UTILIZADO" if (cr["valor_original"] - novo_ut) <= 0 else "VÁLIDO"
-                    update_credito(cr["id"], {"valor_utilizado": novo_ut, "status": novo_st})
-                    insert_movimentacao({"credito_id": cr["id"], "tipo": "UTILIZAÇÃO",
-                                         "valor": float(v_uso), "data": str(date.today()),
-                                         "responsavel": resp or None, "observacao": obs_u or None})
-                    st.success(f"✅ Consumo de {brl(v_uso)} registrado!")
-                    st.rerun()
+                    if not desc_serv.strip():
+                        st.error("Informe a descrição do serviço.")
+                    else:
+                        novo_ut = (cr["valor_utilizado"] or 0) + v_uso
+                        novo_st = "UTILIZADO" if (cr["valor_original"] - novo_ut) <= 0 else "VÁLIDO"
+                        update_credito(cr["id"], {"valor_utilizado": novo_ut, "status": novo_st})
+                        insert_movimentacao({
+                            "credito_id":        cr["id"],
+                            "tipo":              "UTILIZAÇÃO",
+                            "valor":             float(v_uso),
+                            "data":              str(data_serv),
+                            "responsavel":       resp or None,
+                            "observacao":        obs_u or None,
+                            "descricao_servico": desc_serv.strip(),
+                            "codigo_servico":    cod_serv.strip() or None,
+                            "qtd_amostras":      int(qtd_am) if qtd_am > 0 else None,
+                            "valor_amostra":     float(vl_am) if vl_am > 0 else None,
+                        })
+                        st.success(f"✅ Consumo de {brl(v_uso)} registrado!")
+                        st.rerun()
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 4 — MOVIMENTAÇÕES
@@ -406,10 +445,21 @@ with tab_movs:
             df_m = df_m[df_m["responsavel"].fillna("").str.contains(busca2, case=False)]
 
         st.markdown(f"**{len(df_m)} movimentação(ões) — Total: {brl(df_m['valor'].sum())}**")
-        df_show = df_m[["data","tipo","cliente_nome","valor","responsavel","observacao"]].copy()
-        df_show["data"]  = df_show["data"].dt.strftime("%d/%m/%Y")
-        df_show["valor"] = df_show["valor"].apply(brl)
-        df_show.columns  = ["Data","Tipo","Cliente","Valor","Responsável","Observação"]
+
+        # Colunas opcionais (só existem após migração SQL)
+        for col_opt in ["descricao_servico","codigo_servico","qtd_amostras","valor_amostra"]:
+            if col_opt not in df_m.columns:
+                df_m[col_opt] = None
+
+        df_show = df_m[["data","tipo","cliente_nome","descricao_servico","codigo_servico",
+                         "qtd_amostras","valor_amostra","valor","responsavel","observacao"]].copy()
+        df_show["data"]         = df_show["data"].dt.strftime("%d/%m/%Y")
+        df_show["valor"]        = df_show["valor"].apply(brl)
+        df_show["valor_amostra"]= df_show["valor_amostra"].apply(
+            lambda v: brl(v) if pd.notna(v) and v else "—")
+        df_show["qtd_amostras"] = df_show["qtd_amostras"].apply(
+            lambda v: str(int(v)) if pd.notna(v) and v else "—")
+        df_show.columns = ["Data","Tipo","Cliente","Serviço","Cód.","Amostras","Vl/Amostra","Total","Responsável","Obs."]
         st.dataframe(df_show.fillna("—"), use_container_width=True, hide_index=True)
 
         buf = io.BytesIO()
