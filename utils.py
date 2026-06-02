@@ -352,6 +352,7 @@ def sidebar_empresa_periodo(show_periodo: bool = True):
         st.markdown("---")
         if st.button("🔄 Atualizar dados", use_container_width=True):
             st.cache_data.clear()
+            st.cache_resource.clear()
             st.rerun()
         st.caption("⏱ Cache: 5 min")
 
