@@ -7,7 +7,8 @@ from utils import (GLOBAL_CSS, ASSETS, BRAND, NOMES, CHART_COLORS,
                    brl, soma, kpi_card, plotly_layout, sidebar_header,
                    load_company_data, load_vendas_ano,
                    get_empresas_disponiveis, load_data_unificado,
-                   load_vendas_ano_unificado)
+                   load_vendas_ano_unificado,
+                   load_companies_data, load_companies_vendas_ano)
 
 st.set_page_config(page_title="Vendas | GoGenetic", page_icon="🛒", layout="wide")
 st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
@@ -48,18 +49,17 @@ with st.sidebar:
         st.rerun()
     st.caption("⏱ Cache: 5 min")
 
-# ── Carrega dados ──────────────────────────────────────────────────────────────
+# ── Carrega dados (empresas em paralelo) ───────────────────────────────────────
 with st.spinner("Carregando vendas..."):
-    vendas = []
-    for nome in empresas_ativas:
-        for item in load_data_unificado(nome, dt_ini, dt_fim)["vendas"]:
-            vendas.append({**item, "empresa": nome})
+    ano_atual   = date.today().year
+    _period_map = load_companies_data(empresas_ativas, dt_ini, dt_fim)
+    _ano_map    = load_companies_vendas_ano(empresas_ativas, ano_atual)
 
-    # Evolução 12 meses (independe do filtro de período)
-    vendas_12m = []
-    ano_atual = date.today().year
+    vendas, vendas_12m = [], []
     for nome in empresas_ativas:
-        for item in load_vendas_ano_unificado(nome, ano_atual):
+        for item in _period_map[nome]["vendas"]:
+            vendas.append({**item, "empresa": nome})
+        for item in _ano_map[nome]:
             vendas_12m.append({**item, "empresa": nome})
 
 total_vendas = soma(vendas, "valorTotal")

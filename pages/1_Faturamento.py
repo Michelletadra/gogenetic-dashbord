@@ -7,7 +7,8 @@ from datetime import date
 from utils import (GLOBAL_CSS, ASSETS, BRAND, NOMES, NOME_YOU, CHART_COLORS,
                    brl, soma, kpi_card, plotly_layout, sidebar_header,
                    get_clients, load_vendas_ano, load_metas, save_metas,
-                   MESES_PT, get_empresas_disponiveis, load_vendas_ano_unificado)
+                   MESES_PT, get_empresas_disponiveis, load_vendas_ano_unificado,
+                   load_companies_vendas_ano, _parallel)
 
 st.set_page_config(page_title="Faturamento | GoGenetic", page_icon="📊", layout="wide")
 st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
@@ -50,11 +51,12 @@ with st.sidebar:
         st.rerun()
     st.caption("⏱ Cache: 1h para dados anuais")
 
-# ── Carrega dados do ano principal ─────────────────────────────────────────────
+# ── Carrega dados do ano principal (empresas em paralelo) ──────────────────────
 with st.spinner(f"Carregando faturamento de {ano}..."):
+    _ano_data = load_companies_vendas_ano(empresas_ativas, ano)
     vendas_raw = []
-    for nome in empresas_ativas:
-        for item in load_vendas_ano_unificado(nome, ano):
+    for nome, items in _ano_data.items():
+        for item in items:
             vendas_raw.append({**item, "empresa": nome})
 
 # ── Agrupa por mês ─────────────────────────────────────────────────────────────
@@ -196,15 +198,20 @@ st.markdown(f"<div class='section-title'>Comparação Histórica por Mês</div>"
 anos_comp = [a for a in range(ano, ano - 4, -1)]
 
 with st.spinner("Carregando histórico de anos anteriores..."):
-    fat_hist: dict[int, dict[int, float]] = {}
+    # Carrega todos os anos × empresas em paralelo
+    _anos_missing = [a for a in anos_comp if a != ano]
+    _hist_jobs = [(load_companies_vendas_ano, empresas_ativas, a) for a in _anos_missing]
+    _hist_results = _parallel(_hist_jobs) if _hist_jobs else []
+    _hist_by_ano = dict(zip(_anos_missing, _hist_results))
+
+    fat_hist: dict = {}
     for a in anos_comp:
         fat_hist[a] = {m: 0.0 for m in range(1, 13)}
         if a == ano:
-            # já temos
             fat_hist[a] = fat_mes.copy()
         else:
-            for nome in empresas_ativas:
-                for item in load_vendas_ano_unificado(nome, a):
+            for nome, items in _hist_by_ano[a].items():
+                for item in items:
                     try:
                         m = int(pd.to_datetime(item.get("dtVenda","")).month)
                         fat_hist[a][m] += float(item.get("valorTotal") or 0)

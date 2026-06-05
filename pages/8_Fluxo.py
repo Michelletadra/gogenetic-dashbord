@@ -12,7 +12,8 @@ import streamlit as st
 
 from utils import (GLOBAL_CSS, BRAND, brl, soma, kpi_card, plotly_layout,
                    sidebar_header, get_empresas_disponiveis,
-                   load_data_unificado, load_vencidas_unificado)
+                   load_data_unificado, load_vencidas_unificado,
+                   load_companies_data, load_companies_vencidas)
 
 CONTRATOS_XLS  = Path(__file__).parent.parent / "data" / "contratos.xlsx"
 CONTRATOS_JSON = Path(__file__).parent.parent / "data" / "contratos_manual.json"
@@ -161,16 +162,20 @@ with st.sidebar:
         st.rerun()
     st.caption("⏱ Cache: 5 min")
 
-# ── Carrega dados ──────────────────────────────────────────────────────────────
+# ── Carrega dados (empresas em paralelo) ───────────────────────────────────────
 with st.spinner("Carregando fluxo de caixa..."):
+    _dt_ini_s = dt_ini.strftime("%Y-%m-%d")
+    _dt_fim_s = dt_fim.strftime("%Y-%m-%d")
+    _dados_map = load_companies_data(empresas_ativas, _dt_ini_s, _dt_fim_s)
+    _venc_map  = load_companies_vencidas(empresas_ativas)
+
     rec_items, pag_items = [], []
     venc_rec, venc_pag   = [], []
-
     for nome in empresas_ativas:
-        dados = load_data_unificado(nome, dt_ini.strftime("%Y-%m-%d"), dt_fim.strftime("%Y-%m-%d"))
+        dados = _dados_map[nome]
         for it in dados["contas_receber"]: rec_items.append({**it, "empresa": nome})
         for it in dados["contas_pagar"]:   pag_items.append({**it, "empresa": nome})
-        v = load_vencidas_unificado(nome)
+        v = _venc_map[nome]
         for it in v["receber"]: venc_rec.append({**it, "empresa": nome})
         for it in v["pagar"]:   venc_pag.append({**it, "empresa": nome})
 

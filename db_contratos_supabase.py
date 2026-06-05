@@ -13,8 +13,14 @@ def _secret(key: str) -> str:
             pass
     return val
 
+# Singleton — cria o cliente uma única vez por processo
+_CLIENT = None
+
 def _sb():
-    return create_client(_secret("SUPABASE_URL"), _secret("SUPABASE_KEY"))
+    global _CLIENT
+    if _CLIENT is None:
+        _CLIENT = create_client(_secret("SUPABASE_URL"), _secret("SUPABASE_KEY"))
+    return _CLIENT
 
 # ── Status automático ─────────────────────────────────────────────────────────
 def compute_status(data_termino, renovacao_automatica, status_manual="ATIVO"):

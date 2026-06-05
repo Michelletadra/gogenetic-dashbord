@@ -392,24 +392,36 @@ def get_clients() -> dict:
 
 @st.cache_data(ttl=300, show_spinner=False)
 def load_company_data(nome: str, dt_ini: str, dt_fim: str) -> dict:
+    """Carrega os 4 endpoints em paralelo para reduzir latência."""
+    from concurrent.futures import ThreadPoolExecutor
     client = get_clients()[nome]
+    _empty = {"vendas": [], "faturamento": [], "contas_receber": [], "contas_pagar": []}
     try:
+        with ThreadPoolExecutor(max_workers=4) as ex:
+            fv = ex.submit(client.get_vendas,         dt_ini, dt_fim)
+            ff = ex.submit(client.get_faturamento,     dt_ini, dt_fim)
+            fr = ex.submit(client.get_contas_receber,  dt_ini, dt_fim)
+            fp = ex.submit(client.get_contas_pagar,    dt_ini, dt_fim)
         return {
-            "vendas":         client.get_vendas(dt_ini, dt_fim),
-            "faturamento":    client.get_faturamento(dt_ini, dt_fim),
-            "contas_receber": client.get_contas_receber(dt_ini, dt_fim),
-            "contas_pagar":   client.get_contas_pagar(dt_ini, dt_fim),
+            "vendas":         fv.result(),
+            "faturamento":    ff.result(),
+            "contas_receber": fr.result(),
+            "contas_pagar":   fp.result(),
         }
     except Exception as exc:
         st.error(f"Erro ao carregar {nome}: {exc}")
-        return {"vendas": [], "faturamento": [], "contas_receber": [], "contas_pagar": []}
+        return _empty
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def load_vencidas(nome: str) -> dict:
+    from concurrent.futures import ThreadPoolExecutor
     client = get_clients()[nome]
     try:
-        return {"receber": client.get_vencidas_receber(), "pagar": client.get_vencidas_pagar()}
+        with ThreadPoolExecutor(max_workers=2) as ex:
+            fr = ex.submit(client.get_vencidas_receber)
+            fp = ex.submit(client.get_vencidas_pagar)
+        return {"receber": fr.result(), "pagar": fp.result()}
     except Exception:
         return {"receber": [], "pagar": []}
 
@@ -440,36 +452,35 @@ def get_bling_client():
 
 @st.cache_data(ttl=300, show_spinner=False)
 def load_bling_data(dt_ini: str, dt_fim: str) -> dict:
+    from concurrent.futures import ThreadPoolExecutor
     client = get_bling_client()
+    _empty = {"vendas": [], "faturamento": [], "contas_receber": [], "contas_pagar": []}
     if not client:
-        return {"vendas": [], "faturamento": [], "contas_receber": [], "contas_pagar": []}
+        return _empty
     try:
         from bling_api import BlingClient
-        vendas_raw = client.get_vendas(dt_ini, dt_fim)
-        fat_raw    = client.get_faturamento(dt_ini, dt_fim)
-        rec_raw    = client.get_contas_receber(dt_ini, dt_fim)
-        pag_raw    = client.get_contas_pagar(dt_ini, dt_fim)
+        with ThreadPoolExecutor(max_workers=4) as ex:
+            fv = ex.submit(client.get_vendas,         dt_ini, dt_fim)
+            ff = ex.submit(client.get_faturamento,     dt_ini, dt_fim)
+            fr = ex.submit(client.get_contas_receber,  dt_ini, dt_fim)
+            fp = ex.submit(client.get_contas_pagar,    dt_ini, dt_fim)
+        vendas_raw, fat_raw, rec_raw, pag_raw = fv.result(), ff.result(), fr.result(), fp.result()
 
-        # Filtro pós-fetch: garante que só itens dentro do período passam
         def _dentro(item: dict) -> bool:
             venc = item.get("vencimento") or item.get("dataVencimento") or ""
             if not venc:
-                return True  # sem data, deixa passar
-            venc = str(venc)[:10]   # só YYYY-MM-DD
-            return dt_ini <= venc <= dt_fim
-
-        rec_raw = [it for it in rec_raw if _dentro(it)]
-        pag_raw = [it for it in pag_raw if _dentro(it)]
+                return True
+            return dt_ini <= str(venc)[:10] <= dt_fim
 
         return {
             "vendas":         [BlingClient.normaliza_venda(v) for v in vendas_raw],
             "faturamento":    [BlingClient.normaliza_conta(v) for v in fat_raw],
-            "contas_receber": [BlingClient.normaliza_conta(v) for v in rec_raw],
-            "contas_pagar":   [BlingClient.normaliza_conta(v) for v in pag_raw],
+            "contas_receber": [BlingClient.normaliza_conta(v) for v in rec_raw if _dentro(v)],
+            "contas_pagar":   [BlingClient.normaliza_conta(v) for v in pag_raw if _dentro(v)],
         }
     except Exception as exc:
         st.error(f"Erro Bling: {exc}")
-        return {"vendas": [], "faturamento": [], "contas_receber": [], "contas_pagar": []}
+        return _empty
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -602,3 +613,44 @@ def load_plano_contas(nome: str) -> list:
         return client.get_plano_contas()
     except Exception:
         return []
+
+
+# ── Carregamento paralelo entre empresas (usado pelas páginas) ─────────────────
+
+def _parallel(jobs: list) -> list:
+    """
+    Executa uma lista de (callable, *args) em paralelo e retorna os resultados
+    na mesma ordem.  jobs = [(fn, arg1, arg2, ...), ...]
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=max(len(jobs), 1)) as ex:
+        futures = [ex.submit(fn, *args) for fn, *args in jobs]
+    return [f.result() for f in futures]
+
+
+def load_companies_data(nomes: list, dt_ini: str, dt_fim: str) -> dict:
+    """Carrega load_data_unificado para todas as empresas em paralelo.
+    Retorna {nome: {vendas, faturamento, contas_receber, contas_pagar}}."""
+    results = _parallel([(load_data_unificado, n, dt_ini, dt_fim) for n in nomes])
+    return dict(zip(nomes, results))
+
+
+def load_companies_vencidas(nomes: list) -> dict:
+    """Carrega load_vencidas_unificado para todas as empresas em paralelo.
+    Retorna {nome: {receber, pagar}}."""
+    results = _parallel([(load_vencidas_unificado, n) for n in nomes])
+    return dict(zip(nomes, results))
+
+
+def load_companies_vendas_ano(nomes: list, ano: int) -> dict:
+    """Carrega load_vendas_ano_unificado para todas as empresas em paralelo.
+    Retorna {nome: [vendas...]}."""
+    results = _parallel([(load_vendas_ano_unificado, n, ano) for n in nomes])
+    return dict(zip(nomes, results))
+
+
+def load_companies_realizados_12m(nomes: list) -> dict:
+    """Carrega load_realizados_12m para todas as empresas eGestor em paralelo.
+    Retorna {nome: [realizados...]}."""
+    results = _parallel([(load_realizados_12m, n) for n in nomes])
+    return dict(zip(nomes, results))

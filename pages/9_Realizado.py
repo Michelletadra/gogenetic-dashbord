@@ -34,6 +34,8 @@ from utils import (
     plotly_layout,
     sidebar_header,
     soma,
+    load_companies_realizados_12m,
+    _parallel,
 )
 
 # ── Página ────────────────────────────────────────────────────────────────────
@@ -149,59 +151,74 @@ _periodo_antigo = dt_ini_str < _doze_ini_str   # período selecionado fora dos 1
 
 with st.spinner("Carregando realizados..."):
 
-    # — 12 meses (sempre carregado; cache 1h) —
-    doze_raw: list[dict] = []
+    # — 12 meses: carrega empresas eGestor em paralelo + Bling em paralelo —
+    _jobs_12m = [(load_realizados_12m, n) for n in empresas_egestor]
+    if inclui_bling:
+        _jobs_12m.append((load_bling_realizados_12m,))
+    if empresas_egestor:
+        _jobs_12m.append((load_plano_contas, empresas_egestor[0]))
+
+    _res_12m = _parallel(_jobs_12m) if _jobs_12m else []
+
+    # Desempacota resultados
+    _idx = 0
+    _doze_by_empresa: dict = {}
     for nome in empresas_egestor:
-        rows = load_realizados_12m(nome)
+        _doze_by_empresa[nome] = _res_12m[_idx]; _idx += 1
+    _bling_12m = _res_12m[_idx] if inclui_bling else []; _idx += (1 if inclui_bling else 0)
+    plano_raw  = _res_12m[_idx] if empresas_egestor else []
+
+    doze_raw: list[dict] = []
+    for nome, rows in _doze_by_empresa.items():
         for r in rows:
             r["_empresa"] = nome
         doze_raw.extend(rows)
-
-    if inclui_bling:
-        for r in load_bling_realizados_12m():
-            r["_empresa"] = NOME_YOU
-            doze_raw.append(r)
+    for r in _bling_12m:
+        r["_empresa"] = NOME_YOU
+        doze_raw.append(r)
 
     # — Período selecionado: filtra dos 12m ou faz chamada para datas antigas —
     if _periodo_antigo:
-        periodo_raw: list[dict] = []
-        for nome in empresas_egestor:
-            rows = load_pagamentos_realizados(nome, dt_ini_str, dt_fim_str)
-            for r in rows:
-                r["_empresa"] = nome
-            periodo_raw.extend(rows)
+        # Datas antigas: carrega empresas em paralelo
+        _old_jobs = [(load_pagamentos_realizados, n, dt_ini_str, dt_fim_str) for n in empresas_egestor]
         if inclui_bling:
-            for r in load_bling_pagamentos_realizados(dt_ini_str, dt_fim_str):
+            _old_jobs.append((load_bling_pagamentos_realizados, dt_ini_str, dt_fim_str))
+        _old_res = _parallel(_old_jobs) if _old_jobs else []
+        periodo_raw: list[dict] = []
+        for i, nome in enumerate(empresas_egestor):
+            for r in _old_res[i]:
+                r["_empresa"] = nome
+                periodo_raw.append(r)
+        if inclui_bling and _old_res:
+            for r in _old_res[-1]:
                 r["_empresa"] = NOME_YOU
                 periodo_raw.append(r)
     else:
-        # Filtra em memória a partir dos 12m — zero chamadas extras
         periodo_raw = [
             r for r in doze_raw
             if dt_ini_str <= (r.get("dtPgto") or "")[:10] <= dt_fim_str
         ]
 
-    # — Mês atual para KPIs granulares (hoje/semana/mês): cache 5 min —
+    # — Mês atual (cache 5 min): empresas em paralelo se necessário —
     if _is_mes_atual:
-        mes_raw: list[dict] = []
-        for nome in empresas_egestor:
-            rows = load_pagamentos_realizados(nome, mes_ini_str, hoje_str)
-            for r in rows:
-                r["_empresa"] = nome
-            mes_raw.extend(rows)
+        _mes_jobs = [(load_pagamentos_realizados, n, mes_ini_str, hoje_str) for n in empresas_egestor]
         if inclui_bling:
-            for r in load_bling_pagamentos_realizados(mes_ini_str, hoje_str):
+            _mes_jobs.append((load_bling_pagamentos_realizados, mes_ini_str, hoje_str))
+        _mes_res = _parallel(_mes_jobs) if _mes_jobs else []
+        mes_raw: list[dict] = []
+        for i, nome in enumerate(empresas_egestor):
+            for r in _mes_res[i]:
+                r["_empresa"] = nome
+                mes_raw.append(r)
+        if inclui_bling and _mes_res:
+            for r in _mes_res[-1]:
                 r["_empresa"] = NOME_YOU
                 mes_raw.append(r)
     else:
-        # KPI de mês atual também vem dos 12m (ok — diferença máx. 1h)
         mes_raw = [
             r for r in doze_raw
             if mes_ini_str <= (r.get("dtPgto") or "")[:10] <= hoje_str
         ]
-
-    # — Plano de contas eGestor (cache 1h) —
-    plano_raw = load_plano_contas(empresas_egestor[0]) if empresas_egestor else []
 
 
 # ── Mapa hierárquico do plano de contas ───────────────────────────────────────

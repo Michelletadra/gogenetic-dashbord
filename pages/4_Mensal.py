@@ -8,7 +8,8 @@ from calendar import monthrange
 from utils import (GLOBAL_CSS, BRAND, NOMES, CHART_COLORS, MESES_PT,
                    brl, soma, kpi_card, plotly_layout, sidebar_header,
                    load_metas, get_empresas_disponiveis,
-                   load_data_unificado, load_vendas_ano_unificado)
+                   load_data_unificado, load_vendas_ano_unificado,
+                   load_companies_data, _parallel)
 
 st.set_page_config(page_title="Mensal | GoGenetic", page_icon="📅", layout="wide")
 st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
@@ -50,15 +51,22 @@ dt_fim = date(ano, mes, ultimo_dia).strftime("%Y-%m-%d")
 dt_ini_ant = date(ano - 1, mes, 1).strftime("%Y-%m-%d")
 dt_fim_ant = date(ano - 1, mes, monthrange(ano - 1, mes)[1]).strftime("%Y-%m-%d")
 
-# ── Carrega dados ──────────────────────────────────────────────────────────────
+# ── Carrega dados (períodos e empresas em paralelo) ────────────────────────────
 with st.spinner(f"Carregando {mes_nome} {ano}..."):
+    # Carrega período atual + período anterior de todas as empresas em paralelo
+    _jobs = (
+        [(load_data_unificado, n, dt_ini,     dt_fim)     for n in empresas_ativas] +
+        [(load_data_unificado, n, dt_ini_ant, dt_fim_ant) for n in empresas_ativas]
+    )
+    _res = _parallel(_jobs)
+    _n   = len(empresas_ativas)
+    _cur = dict(zip(empresas_ativas, _res[:_n]))
+    _ant = dict(zip(empresas_ativas, _res[_n:]))
+
     vendas, fat, rec, pag = [], [], [], []
     vendas_ant, fat_ant   = [], []
-
     for nome in empresas_ativas:
-        d     = load_data_unificado(nome, dt_ini, dt_fim)
-        d_ant = load_data_unificado(nome, dt_ini_ant, dt_fim_ant)
-
+        d, d_ant = _cur[nome], _ant[nome]
         for item in d["vendas"]:         vendas.append({**item, "empresa": nome})
         for item in d["faturamento"]:    fat.append({**item, "empresa": nome})
         for item in d["contas_receber"]: rec.append({**item, "empresa": nome})

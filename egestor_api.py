@@ -1,4 +1,5 @@
 import time
+import threading
 from typing import Optional
 
 import requests
@@ -15,30 +16,33 @@ class EgestorClient:
         self._access_token: Optional[str] = None
         self._token_expires_at: float = 0.0
         self._request_times: list = []
+        self._lock = threading.RLock()   # protege token + rate-limit em chamadas paralelas
 
     def _get_access_token(self) -> str:
-        now = time.time()
-        if self._access_token and now < self._token_expires_at - 60:
+        with self._lock:
+            now = time.time()
+            if self._access_token and now < self._token_expires_at - 60:
+                return self._access_token
+            resp = requests.post(
+                TOKEN_URL,
+                json={"grant_type": "personal", "personal_token": self.personal_token},
+                timeout=15,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            self._access_token = data["access_token"]
+            self._token_expires_at = now + data.get("expires_in", 900)
             return self._access_token
-        resp = requests.post(
-            TOKEN_URL,
-            json={"grant_type": "personal", "personal_token": self.personal_token},
-            timeout=15,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        self._access_token = data["access_token"]
-        self._token_expires_at = now + data.get("expires_in", 900)
-        return self._access_token
 
     def _rate_limit(self):
-        now = time.time()
-        self._request_times = [t for t in self._request_times if now - t < 60]
-        if len(self._request_times) >= 55:
-            wait = 61 - (now - self._request_times[0])
-            if wait > 0:
-                time.sleep(wait)
-        self._request_times.append(time.time())
+        with self._lock:
+            now = time.time()
+            self._request_times = [t for t in self._request_times if now - t < 60]
+            if len(self._request_times) >= 55:
+                wait = 61 - (now - self._request_times[0])
+                if wait > 0:
+                    time.sleep(wait)
+            self._request_times.append(time.time())
 
     def _get(self, endpoint: str, params: Optional[dict] = None) -> dict:
         self._rate_limit()

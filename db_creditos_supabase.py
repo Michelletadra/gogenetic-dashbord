@@ -12,8 +12,14 @@ def _secret(key: str) -> str:
             pass
     return val
 
+# Singleton — cria o cliente uma única vez por processo
+_CLIENT = None
+
 def _sb():
-    return create_client(_secret("SUPABASE_URL"), _secret("SUPABASE_KEY"))
+    global _CLIENT
+    if _CLIENT is None:
+        _CLIENT = create_client(_secret("SUPABASE_URL"), _secret("SUPABASE_KEY"))
+    return _CLIENT
 
 # ── Clientes ──────────────────────────────────────────────────────────────────
 def list_clientes(busca=None):
@@ -86,26 +92,19 @@ def delete_credito(id):
 
 # ── Movimentações ─────────────────────────────────────────────────────────────
 def list_movimentacoes(credito_id=None, cliente_id=None):
+    """Retorna movimentações sem joins pesados; cliente_nome é enriquecido em memória."""
     if cliente_id:
         cred_ids = [c["id"] for c in list_creditos(cliente_id=cliente_id)]
         if not cred_ids:
             return []
-        q = _sb().table("movimentacoes").select(
-            "*, creditos(valor_original, clientes(nome))"
-        ).in_("credito_id", cred_ids).order("created_at", desc=True)
-    else:
-        q = _sb().table("movimentacoes").select(
-            "*, creditos(valor_original, clientes(nome))"
+        q = _sb().table("movimentacoes").select("*").in_(
+            "credito_id", cred_ids
         ).order("created_at", desc=True)
+    else:
+        q = _sb().table("movimentacoes").select("*").order("created_at", desc=True)
         if credito_id:
             q = q.eq("credito_id", credito_id)
-    rows = q.execute().data
-    for r in rows:
-        cr  = r.pop("creditos", None) or {}
-        cli = cr.pop("clientes", None) or {}
-        r["valor_original"] = cr.get("valor_original", 0)
-        r["cliente_nome"]   = cli.get("nome", "")
-    return rows
+    return q.execute().data
 
 def insert_movimentacao(data) -> int:
     r = _sb().table("movimentacoes").insert(data).execute()

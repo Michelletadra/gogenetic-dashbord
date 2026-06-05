@@ -8,7 +8,8 @@ from utils import (GLOBAL_CSS, BRAND, NOMES, CHART_COLORS,
                    brl, soma, kpi_card, plotly_layout, sidebar_header,
                    load_company_data, load_vencidas,
                    get_empresas_disponiveis, load_data_unificado,
-                   load_vencidas_unificado)
+                   load_vencidas_unificado,
+                   load_companies_data, load_companies_vencidas)
 
 st.set_page_config(page_title="Contas | GoGenetic", page_icon="💳", layout="wide")
 st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
@@ -76,15 +77,18 @@ with st.sidebar:
         st.rerun()
     st.caption("⏱ Cache: 5 min")
 
-# ── Carrega dados ──────────────────────────────────────────────────────────────
+# ── Carrega dados (empresas em paralelo) ───────────────────────────────────────
 with st.spinner("Carregando contas..."):
+    _dados_map = load_companies_data(empresas_ativas, dt_ini_str, dt_fim_str)
+    _venc_map  = load_companies_vencidas(empresas_ativas)
+
     contas_rec, contas_pag = [], []
     venc_rec,   venc_pag   = [], []
     for nome in empresas_ativas:
-        dados = load_data_unificado(nome, dt_ini_str, dt_fim_str)
+        dados = _dados_map[nome]
         for item in dados["contas_receber"]: contas_rec.append({**item, "empresa": nome})
         for item in dados["contas_pagar"]:   contas_pag.append({**item, "empresa": nome})
-        v = load_vencidas_unificado(nome)
+        v = _venc_map[nome]
         for item in v["receber"]: venc_rec.append({**item, "empresa": nome})
         for item in v["pagar"]:   venc_pag.append({**item, "empresa": nome})
 
