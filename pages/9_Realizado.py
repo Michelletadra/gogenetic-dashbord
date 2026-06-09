@@ -155,8 +155,9 @@ with st.spinner("Carregando realizados..."):
     _jobs_12m = [(load_realizados_12m, n) for n in empresas_egestor]
     if inclui_bling:
         _jobs_12m.append((load_bling_realizados_12m,))
-    if empresas_egestor:
-        _jobs_12m.append((load_plano_contas, empresas_egestor[0]))
+    # Carrega plano de contas de TODAS as empresas eGestor (não só a primeira)
+    for _emp in empresas_egestor:
+        _jobs_12m.append((load_plano_contas, _emp))
 
     _res_12m = _parallel(_jobs_12m) if _jobs_12m else []
 
@@ -166,7 +167,16 @@ with st.spinner("Carregando realizados..."):
     for nome in empresas_egestor:
         _doze_by_empresa[nome] = _res_12m[_idx]; _idx += 1
     _bling_12m = _res_12m[_idx] if inclui_bling else []; _idx += (1 if inclui_bling else 0)
-    plano_raw  = _res_12m[_idx] if empresas_egestor else []
+
+    # Mescla planos de contas de todas as empresas (códigos únicos por código)
+    plano_raw: list[dict] = []
+    _plano_codigos: set = set()
+    for _emp in empresas_egestor:
+        for _item in _res_12m[_idx]:
+            if _item.get("codigo") not in _plano_codigos:
+                plano_raw.append(_item)
+                _plano_codigos.add(_item.get("codigo"))
+        _idx += 1
 
     doze_raw: list[dict] = []
     for nome, rows in _doze_by_empresa.items():
