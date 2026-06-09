@@ -628,31 +628,72 @@ if not df_periodo.empty:
     # ── Aba: Lançamentos individuais ───────────────────────────────────────────
     with tab_detalhe:
         c1, c2 = st.columns(2)
-        grupos_filtro   = ["Todos"] + sorted(df_periodo["Grupo"].unique().tolist())
-        grupo_sel_f     = c1.selectbox("🔍 Grupo", grupos_filtro, key="real_grp_sel")
+
+        # Grupo — selectbox (único)
+        grupos_filtro = ["Todos"] + sorted(df_periodo["Grupo"].unique().tolist())
+        grupo_sel_f   = c1.selectbox("🔍 Grupo", grupos_filtro, key="real_grp_sel")
 
         df_filtrado = df_periodo.copy()
         if grupo_sel_f != "Todos":
             df_filtrado = df_filtrado[df_filtrado["Grupo"] == grupo_sel_f]
 
-        subs_filtro = ["Todos"] + sorted(df_filtrado["Subgrupo"].unique().tolist())
-        sub_sel_f   = c2.selectbox("🔍 Subgrupo", subs_filtro, key="real_sub_sel")
-        if sub_sel_f != "Todos":
-            df_filtrado = df_filtrado[df_filtrado["Subgrupo"] == sub_sel_f]
+        # Subgrupo — multiselect (múltipla seleção)
+        subs_disponiveis = sorted(df_filtrado["Subgrupo"].unique().tolist())
+        subs_sel = c2.multiselect(
+            "🔍 Subgrupo (selecione um ou mais)",
+            subs_disponiveis,
+            default=[],
+            key="real_sub_sel",
+            placeholder="Todos os subgrupos",
+        )
+        if subs_sel:
+            df_filtrado = df_filtrado[df_filtrado["Subgrupo"].isin(subs_sel)]
 
-        df_filtrado = df_filtrado.sort_values("Data", ascending=False)
-        df_filtrado["Data"] = df_filtrado["Data"].dt.strftime("%d/%m/%Y")
+        df_filtrado = df_filtrado.sort_values("Data", ascending=False).reset_index(drop=True)
+
+        # ── Tabela com checkbox de seleção ────────────────────────────────────
+        df_filtrado["Data_fmt"]   = df_filtrado["Data"].dt.strftime("%d/%m/%Y")
         df_filtrado["Valor (R$)"] = df_filtrado["Valor"].map(lambda v: f"R$ {v:,.2f}")
 
-        cols_show = ["Data", "Grupo", "Subgrupo", "Descrição", "Fornecedor", "Valor (R$)", "Empresa"]
-        st.dataframe(df_filtrado[cols_show].reset_index(drop=True),
-                     use_container_width=True, hide_index=True)
+        cols_show = ["Data_fmt", "Grupo", "Subgrupo", "Descrição", "Fornecedor", "Valor (R$)", "Empresa"]
+        df_display = df_filtrado[cols_show].copy()
+        df_display.columns = ["Data", "Grupo", "Subgrupo", "Descrição", "Fornecedor", "Valor (R$)", "Empresa"]
 
-        subtotal = df_filtrado["Valor"].sum()
-        st.markdown(
-            f"**Subtotal:** {brl(subtotal)} &nbsp;·&nbsp; **{len(df_filtrado)} lançamentos**",
-            unsafe_allow_html=True,
+        # Usa st.data_editor com coluna de seleção para somar itens marcados
+        df_display.insert(0, "✅", False)
+        edited = st.data_editor(
+            df_display,
+            use_container_width=True,
+            hide_index=True,
+            column_config={"✅": st.column_config.CheckboxColumn("✅", width="small")},
+            key="real_lancamentos_editor",
         )
+
+        # Totais
+        total_filtrado = df_filtrado["Valor"].sum()
+        selecionados   = edited[edited["✅"] == True]
+        n_sel          = len(selecionados)
+
+        if n_sel > 0:
+            # Recupera valores numéricos dos itens selecionados
+            total_sel = df_filtrado.loc[edited["✅"].values, "Valor"].sum()
+            col_t1, col_t2 = st.columns(2)
+            col_t1.markdown(
+                f"**Subtotal ({len(df_filtrado)} lançamentos):** {brl(total_filtrado)}",
+                unsafe_allow_html=True,
+            )
+            col_t2.markdown(
+                f"<span style='background:#EDE9F8;padding:6px 14px;border-radius:8px;"
+                f"font-weight:700;color:#4A1259'>✅ {n_sel} selecionado(s): "
+                f"{brl(total_sel)}</span>",
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                f"**Subtotal:** {brl(total_filtrado)} &nbsp;·&nbsp; "
+                f"**{len(df_filtrado)} lançamentos** — marque linhas para somar",
+                unsafe_allow_html=True,
+            )
 
         buf_d = io.BytesIO()
         with pd.ExcelWriter(buf_d, engine="openpyxl") as xw:
