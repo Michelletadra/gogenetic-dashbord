@@ -155,7 +155,7 @@ with st.spinner("Carregando realizados..."):
     _jobs_12m = [(load_realizados_12m, n) for n in empresas_egestor]
     if inclui_bling:
         _jobs_12m.append((load_bling_realizados_12m,))
-    # Carrega plano de contas de TODAS as empresas eGestor (não só a primeira)
+    # Carrega plano de contas de CADA empresa separadamente
     for _emp in empresas_egestor:
         _jobs_12m.append((load_plano_contas, _emp))
 
@@ -168,15 +168,15 @@ with st.spinner("Carregando realizados..."):
         _doze_by_empresa[nome] = _res_12m[_idx]; _idx += 1
     _bling_12m = _res_12m[_idx] if inclui_bling else []; _idx += (1 if inclui_bling else 0)
 
-    # Mescla planos de contas de todas as empresas (códigos únicos por código)
-    plano_raw: list[dict] = []
-    _plano_codigos: set = set()
+    # Plano de contas POR EMPRESA — cada uma tem sua própria hierarquia de códigos
+    _plano_por_empresa: dict[str, list] = {}
     for _emp in empresas_egestor:
-        for _item in _res_12m[_idx]:
-            if _item.get("codigo") not in _plano_codigos:
-                plano_raw.append(_item)
-                _plano_codigos.add(_item.get("codigo"))
-        _idx += 1
+        _plano_por_empresa[_emp] = _res_12m[_idx]; _idx += 1
+
+    # plano_raw para a empresa selecionada (ou primeira, para compatibilidade)
+    _emp_ref = empresa_sel if empresa_sel != "Todas" and empresa_sel in _plano_por_empresa \
+               else (empresas_egestor[0] if empresas_egestor else None)
+    plano_raw = _plano_por_empresa.get(_emp_ref, []) if _emp_ref else []
 
     doze_raw: list[dict] = []
     for nome, rows in _doze_by_empresa.items():
@@ -249,19 +249,26 @@ def _build_plano_info(plano_raw: list[dict]) -> dict[int, dict]:
         nome_direto = str(item.get("nome", "Sem Categoria"))
         cod_pai = int(item.get("codPai") or 0)
         if cod_pai == 0:
-            # já é raiz
             result[cod] = {"grupo": nome_direto, "subgrupo": nome_direto}
         else:
             result[cod] = {"grupo": _root_nome(cod), "subgrupo": nome_direto}
     return result
 
 
+# Constrói plano_info separado por empresa (códigos iguais = categorias diferentes!)
+_plano_info_por_empresa: dict[str, dict] = {
+    emp: _build_plano_info(raw)
+    for emp, raw in _plano_por_empresa.items()
+}
+# plano_info global para a empresa de referência (gráficos de evolução 12m)
 plano_info = _build_plano_info(plano_raw)
 
 
-def _get_info(cod) -> dict:
+def _get_info(cod, empresa: str = "") -> dict:
+    """Usa o plano da empresa específica; fallback para o global."""
+    pi = _plano_info_por_empresa.get(empresa, plano_info)
     try:
-        return plano_info.get(int(cod), {"grupo": "Sem Categoria", "subgrupo": "Sem Categoria"})
+        return pi.get(int(cod), {"grupo": "Sem Categoria", "subgrupo": "Sem Categoria"})
     except (TypeError, ValueError):
         return {"grupo": "Sem Categoria", "subgrupo": "Sem Categoria"}
 
@@ -275,11 +282,12 @@ def _to_df(raw: list[dict]) -> pd.DataFrame:
     for r in raw:
         # Bling traz _grupo_bling/_subgrupo_bling; eGestor usa codPlanoContas
         if "_grupo_bling" in r:
-            grupo   = r["_grupo_bling"]
+            grupo    = r["_grupo_bling"]
             subgrupo = r["_subgrupo_bling"]
         else:
-            info    = _get_info(r.get("codPlanoContas"))
-            grupo   = info["grupo"]
+            # Usa o plano de contas específico da empresa do registro
+            info     = _get_info(r.get("codPlanoContas"), r.get("_empresa", ""))
+            grupo    = info["grupo"]
             subgrupo = info["subgrupo"]
         rows.append({
             "Data":       (r.get("dtPgto") or r.get("data") or "")[:10],
