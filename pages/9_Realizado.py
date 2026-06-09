@@ -204,10 +204,21 @@ with st.spinner("Carregando realizados..."):
                 r["_empresa"] = NOME_YOU
                 periodo_raw.append(r)
     else:
+        # Filtra dos 12m (para eGestor) — Bling 12m não tem categorias detalhadas
         periodo_raw = [
             r for r in doze_raw
             if dt_ini_str <= (r.get("dtPgto") or "")[:10] <= dt_fim_str
         ]
+        # Para Bling: busca enriquecido (com categorias) para o período selecionado.
+        # Essa chamada é cacheada 1h; na 1ª vez pode levar alguns segundos (depende do nº de lançamentos).
+        if inclui_bling and not _is_mes_atual:
+            _bling_enriquecido = load_bling_pagamentos_realizados(dt_ini_str, dt_fim_str)
+            if _bling_enriquecido:
+                for _r in _bling_enriquecido:
+                    _r["_empresa"] = NOME_YOU
+                # Substitui registros Bling sem categoria pelos enriquecidos
+                periodo_raw = [r for r in periodo_raw if r.get("_empresa") != NOME_YOU]
+                periodo_raw.extend(_bling_enriquecido)
 
     # — Mês atual (cache 5 min): empresas em paralelo se necessário —
     if _is_mes_atual:

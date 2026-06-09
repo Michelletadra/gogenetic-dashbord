@@ -624,13 +624,26 @@ def load_bling_pagamentos_realizados(dt_ini: str, dt_fim: str) -> list:
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def load_bling_realizados_12m() -> list:
-    """Realizados Bling dos últimos 12 meses (cache 1h)."""
+    """Realizados Bling dos últimos 12 meses — versão rápida SEM detalhes.
+    Busca apenas a lista (1 chamada por página) sem ir em cada conta individualmente.
+    Categorias aparecem como 'Sem Categoria'; use load_bling_pagamentos_realizados
+    para um período específico quando precisar das categorias detalhadas.
+    """
     from datetime import date
-    dt_fim = date.today()
-    dt_ini = dt_fim.replace(year=dt_fim.year - 1)
-    return load_bling_pagamentos_realizados(
-        dt_ini.strftime("%Y-%m-%d"), dt_fim.strftime("%Y-%m-%d")
-    )
+    from bling_api import BlingClient
+    client = get_bling_client()
+    if not client:
+        return []
+    try:
+        dt_fim = date.today()
+        dt_ini = dt_fim.replace(year=dt_fim.year - 1)
+        raw = client.get_pagamentos_realizados(
+            dt_ini.strftime("%Y-%m-%d"), dt_fim.strftime("%Y-%m-%d")
+        )
+        # Normaliza sem buscar detalhe individual (1099 chamadas = ~6 min → inviável)
+        return [BlingClient.normaliza_pagamento_realizado(r) for r in raw]
+    except Exception:
+        return []
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
