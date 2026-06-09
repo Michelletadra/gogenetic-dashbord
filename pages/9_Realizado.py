@@ -122,6 +122,12 @@ with st.sidebar:
         st.cache_data.clear()
         st.rerun()
     st.caption("⏱ KPI: 5 min · Evolução: 1h")
+    # Debug: mostra empresas disponíveis
+    _disp_debug = get_empresas_disponiveis()
+    if NOME_YOU in _disp_debug:
+        st.caption(f"✅ Bling conectado ({NOME_YOU})")
+    else:
+        st.caption("⚠️ Bling não conectado")
 
 # ── Empresas ativas ───────────────────────────────────────────────────────────
 _todas = get_empresas_disponiveis()
@@ -313,6 +319,11 @@ def _to_df(raw: list[dict]) -> pd.DataFrame:
     df["Data"] = pd.to_datetime(df["Data"], errors="coerce")
     return df
 
+
+# Para "Este mês": usa mes_raw (já enriquecido com categorias Bling)
+# como período de referência para charts e detalhe
+if _is_mes_atual:
+    periodo_raw = mes_raw
 
 df_periodo = _to_df(periodo_raw)
 df_mes     = _to_df(mes_raw)
