@@ -576,16 +576,46 @@ def load_realizados_12m(nome: str) -> list:
         return []
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=3600, show_spinner=False)
+def load_bling_categorias() -> dict:
+    """Carrega categorias do Bling e retorna mapa id → {grupo, subgrupo} (cache 1h)."""
+    client = get_bling_client()
+    if not client:
+        return {}
+    try:
+        from bling_api import BlingClient
+        cats = client.get_categorias()
+        return BlingClient.build_cat_map(cats)
+    except Exception:
+        return {}
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
 def load_bling_pagamentos_realizados(dt_ini: str, dt_fim: str) -> list:
-    """Contas a pagar pagas do Bling, filtradas por data de pagamento."""
+    """Contas a pagar pagas do Bling, com categoria enriquecida (cache 1h).
+    Busca detalhes individuais em paralelo para obter categoria.id e historico.
+    """
     client = get_bling_client()
     if not client:
         return []
     try:
         from bling_api import BlingClient
-        raw = client.get_pagamentos_realizados(dt_ini, dt_fim)
-        return [BlingClient.normaliza_pagamento_realizado(r) for r in raw]
+        from concurrent.futures import ThreadPoolExecutor
+
+        raw      = client.get_pagamentos_realizados(dt_ini, dt_fim)
+        cat_map  = load_bling_categorias()
+
+        # Busca detalhes individuais em paralelo (max 3 workers = ~3 req/s)
+        ids = [r["id"] for r in raw]
+        with ThreadPoolExecutor(max_workers=3) as ex:
+            details = list(ex.map(client.get_pagamento_detalhe, ids))
+
+        # Usa o detalhe quando disponível, fallback para o registro da lista
+        enriched = []
+        for r_list, r_det in zip(raw, details):
+            base = {**r_list, **r_det} if r_det else r_list
+            enriched.append(BlingClient.normaliza_pagamento_realizado(base, cat_map))
+        return enriched
     except Exception as exc:
         import streamlit as _st
         _st.error(f"Erro Bling realizados: {exc}")

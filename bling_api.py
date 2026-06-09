@@ -97,6 +97,17 @@ class BlingClient:
             "situacoes[]":          2,    # 2=Pago
         })
 
+    def get_categorias(self) -> list:
+        """Retorna todas as categorias de receitas/despesas do Bling."""
+        return self._get_all_pages("categorias/receitas-despesas")
+
+    def get_pagamento_detalhe(self, pag_id: int) -> dict:
+        """Retorna detalhe de uma conta a pagar (inclui categoria e historico)."""
+        import time as _time
+        _time.sleep(0.35)   # respeita rate limit ~3 req/s
+        r = self._get(f"contas/pagar/{pag_id}")
+        return r.get("data", {})
+
     def get_vencidas_receber(self) -> list:
         ontem = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
         return self._get_all_pages("contas/receber", {
@@ -143,22 +154,51 @@ class BlingClient:
         }
 
     @staticmethod
-    def normaliza_pagamento_realizado(item: dict) -> dict:
+    def normaliza_pagamento_realizado(item: dict, cat_map: dict = None) -> dict:
         """Converte conta/pagar paga do Bling para o formato do Realizado.
-        Usa categoria como grupo/subgrupo (Bling não tem hierarquia de plano de contas).
+        Se cat_map (id → {grupo, subgrupo}) for fornecido, usa hierarquia real.
         """
-        contato   = item.get("contato") or {}
-        categoria = item.get("categoria") or {}
-        cat_nome  = categoria.get("descricao") or "Sem Categoria"
+        contato    = item.get("contato") or {}
+        cat_id     = (item.get("categoria") or {}).get("id")
+        historico  = item.get("historico") or item.get("descricao") or ""
+
+        if cat_map and cat_id and cat_id in cat_map:
+            grupo    = cat_map[cat_id]["grupo"]
+            subgrupo = cat_map[cat_id]["subgrupo"]
+        else:
+            grupo    = historico or "Sem Categoria"
+            subgrupo = historico or "Sem Categoria"
+
         return {
             "codigo":       item.get("id", ""),
-            "descricao":    item.get("descricao") or item.get("historico", ""),
+            "descricao":    historico,
             "valor":        item.get("valor", 0),
-            "dtPgto":       item.get("dataPagamento", ""),
+            "dtPgto":       item.get("dataPagamento") or item.get("vencimento") or "",
             "dtVenc":       item.get("vencimento") or "",
             "nomeContato":  contato.get("nome", ""),
-            "situacao":     2,           # pago
-            # campos especiais para o Realizado (bypass do plano de contas eGestor)
-            "_grupo_bling":    cat_nome,
-            "_subgrupo_bling": cat_nome,
+            "situacao":     2,
+            "_grupo_bling":    grupo,
+            "_subgrupo_bling": subgrupo,
         }
+
+    @staticmethod
+    def build_cat_map(categorias: list) -> dict:
+        """Constrói mapa id → {grupo, subgrupo} a partir da lista de categorias."""
+        by_id = {c["id"]: c for c in categorias}
+
+        def root_nome(cid, depth=0):
+            if depth > 8 or cid not in by_id:
+                return "Sem Categoria"
+            c = by_id[cid]
+            pai = c.get("idCategoriaPai") or 0
+            if not pai:
+                return c.get("descricao", "Sem Categoria")
+            return root_nome(pai, depth + 1)
+
+        result = {}
+        for cid, c in by_id.items():
+            pai = c.get("idCategoriaPai") or 0
+            sub = c.get("descricao", "Sem Categoria")
+            grp = root_nome(cid) if pai else sub
+            result[cid] = {"grupo": grp, "subgrupo": sub}
+        return result
