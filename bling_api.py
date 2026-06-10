@@ -21,7 +21,8 @@ class BlingClient:
             time.sleep(0.4)
         self._request_times.append(time.time())
 
-    def _get(self, endpoint: str, params: Optional[dict] = None) -> dict:
+    def _get(self, endpoint: str, params: Optional[dict] = None,
+             _retry_auth: bool = True) -> dict:
         self._rate_limit()
         resp = requests.get(
             f"{API_URL}/{endpoint}",
@@ -34,7 +35,17 @@ class BlingClient:
         )
         if resp.status_code == 429:
             time.sleep(10)
-            return self._get(endpoint, params)
+            return self._get(endpoint, params, _retry_auth=_retry_auth)
+        if resp.status_code in (401, 403) and _retry_auth:
+            # Token expirado/rejeitado → tenta renovar e repete uma vez
+            try:
+                import bling_auth as _ba
+                new_token = _ba.get_valid_token(force_refresh=True)
+                if new_token:
+                    self._token = new_token
+                    return self._get(endpoint, params, _retry_auth=False)
+            except Exception:
+                pass
         resp.raise_for_status()
         return resp.json()
 

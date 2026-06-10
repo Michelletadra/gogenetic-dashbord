@@ -99,6 +99,40 @@ def _refresh(refresh_tok: str) -> dict:
     return tokens
 
 
+def _supabase_save(tokens: dict):
+    """Persiste tokens no Supabase (sobrevive restarts do Streamlit Cloud)."""
+    try:
+        from supabase import create_client
+        url = _secret("SUPABASE_URL")
+        key = _secret("SUPABASE_KEY")
+        if not url or not key:
+            return
+        sb = create_client(url, key)
+        sb.table("settings").upsert(
+            {"key": "bling_tokens", "value": tokens}
+        ).execute()
+    except Exception:
+        pass
+
+
+def _supabase_load() -> dict:
+    """Carrega tokens do Supabase."""
+    try:
+        from supabase import create_client
+        url = _secret("SUPABASE_URL")
+        key = _secret("SUPABASE_KEY")
+        if not url or not key:
+            return {}
+        sb = create_client(url, key)
+        r = sb.table("settings").select("value").eq("key", "bling_tokens").execute()
+        if r.data:
+            raw = r.data[0]["value"]
+            return json.loads(raw) if isinstance(raw, str) else raw
+    except Exception:
+        pass
+    return {}
+
+
 def _save(tokens: dict):
     try:
         TOKEN_FILE.write_text(json.dumps(tokens, indent=2, ensure_ascii=False))
@@ -110,6 +144,8 @@ def _save(tokens: dict):
         st.session_state["_bling_tokens"] = tokens
     except Exception:
         pass
+    # Persiste no Supabase para sobreviver restarts do Streamlit Cloud
+    _supabase_save(tokens)
 
 
 def load() -> dict:
@@ -126,7 +162,11 @@ def load() -> dict:
             return json.loads(TOKEN_FILE.read_text())
         except Exception:
             pass
-    # 3) secrets do Streamlit Cloud (tokens iniciais)
+    # 3) Supabase (persiste entre restarts)
+    sb_tokens = _supabase_load()
+    if sb_tokens:
+        return sb_tokens
+    # 4) secrets do Streamlit Cloud (tokens iniciais — fallback)
     try:
         import streamlit as st
         if "bling_tokens" in st.secrets:
@@ -136,21 +176,25 @@ def load() -> dict:
     return {}
 
 
-def get_valid_token() -> Optional[str]:
-    """Retorna um access_token válido, renovando se necessário."""
+def get_valid_token(force_refresh: bool = False) -> Optional[str]:
+    """Retorna um access_token válido, renovando se necessário.
+    force_refresh=True ignora o timestamp e sempre tenta renovar.
+    """
     tokens = load()
     if not tokens:
         return None
-    expires_at = datetime.fromisoformat(tokens.get("expires_at", "2000-01-01"))
-    if datetime.now() < expires_at - timedelta(minutes=5):
-        return tokens.get("access_token")
+    if not force_refresh:
+        expires_at = datetime.fromisoformat(tokens.get("expires_at", "2000-01-01"))
+        if datetime.now() < expires_at - timedelta(minutes=5):
+            return tokens.get("access_token")
     if tokens.get("refresh_token"):
         try:
             new_tokens = _refresh(tokens["refresh_token"])
             return new_tokens.get("access_token")
         except Exception:
-            return None
-    return None
+            # Refresh falhou — devolve o token atual mesmo que expirado
+            return tokens.get("access_token") if not force_refresh else None
+    return tokens.get("access_token") if not force_refresh else None
 
 
 def is_connected() -> bool:
