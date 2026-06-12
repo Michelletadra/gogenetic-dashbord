@@ -43,7 +43,7 @@ CATEGORIAS = ["Kits moleculares","Microbioma de solo","Metagenômica","SaaS + ge
               "Escala industrial","Equipamentos","Consultoria técnica","Desenvolvimento",
               "Pesquisa microbiológica","Internacional","Outro"]
 EMPRESAS  = ["GG SOLUÇÕES","GOSOLOS","GOGENETIC","GG PESQUISA"]
-_EMPRESA_LABEL = {"GOGENETIC": "Gogenetic You"}
+_EMPRESA_LABEL = {"GOGENETIC": "GG You"}
 INDICES   = ["IPCA","IGP-M","SELIC","INPC","Fixo","Outro"]
 MOEDAS    = ["BRL","USD","EUR","GBP","JPY"]
 PAGAMENTOS= ["Mensal","Trimestral","Semestral","Anual","Por parcela","Por amostra","Pontual"]
