@@ -11,20 +11,14 @@ def _backend_mod():
     global _mod
     if _mod is not None:
         return _mod
-    # Tenta ler o backend
-    backend = os.getenv("DB_BACKEND", "")
-    if not backend:
+    supabase_url = os.getenv("SUPABASE_URL", "")
+    if not supabase_url:
         try:
             import streamlit as st
-            backend = st.secrets.get("DB_BACKEND", "")
-            if not backend and st.secrets.get("SUPABASE_URL"):
-                backend = "supabase"
+            supabase_url = st.secrets.get("SUPABASE_URL", "")
         except Exception:
             pass
-    if not backend and os.getenv("SUPABASE_URL"):
-        backend = "supabase"
-
-    if backend == "supabase":
+    if supabase_url:
         import db_creditos_supabase as m
     else:
         import db_creditos_sqlite as m
