@@ -190,11 +190,10 @@ with tab_painel:
 with tab_lista:
     # ── Filtros ───────────────────────────────────────────────────────────────
     with st.expander("🔍 Filtros", expanded=True):
-        fc1, fc2, fc3, fc4 = st.columns(4)
+        fc1, fc2, fc3 = st.columns(3)
         f_empresa  = fc1.selectbox("Empresa", ["Todas"] + EMPRESAS, key="fl_emp")
         f_tipo     = fc2.selectbox("Tipo", ["Todos"] + TIPOS, key="fl_tipo")
-        f_status   = fc3.multiselect("Status", list(STATUS_COLORS.keys()), key="fl_status")
-        f_busca    = fc4.text_input("🔎 Buscar", key="fl_busca")
+        f_busca    = fc3.text_input("🔎 Buscar", key="fl_busca")
         fc5, fc6, fc7, fc8 = st.columns(4)
         f_intern   = fc5.checkbox("🌍 Internacionais", key="fl_int")
         f_wl       = fc6.checkbox("🏷️ White label", key="fl_wl")
@@ -210,100 +209,118 @@ with tab_lista:
         recorrente=True if f_recorr else None,
         tem_comissao=True if f_comiss else None,
     )
-    if f_status:
-        todos_ct = [c for c in todos_ct if c["status_real"] in f_status]
 
-    st.markdown(f"**{len(todos_ct)} contrato(s)**")
+    _ATIVOS_SR    = {"ATIVO","VENCENDO 30D","VENCENDO 60D","VENCENDO 90D",
+                     "RENOVAÇÃO AUTOMÁTICA","EM NEGOCIAÇÃO","SUSPENSO"}
+    _VENCIDOS_SR  = {"VENCIDO"}
+    _ENCERR_SR    = {"ENCERRADO","RESCINDIDO"}
 
-    if not todos_ct:
-        st.info("Nenhum contrato encontrado com os filtros selecionados.")
-    else:
-        # ── Tabela resumida ────────────────────────────────────────────────────
-        for ct in todos_ct:
-            sr   = ct["status_real"]
-            cor, bg = STATUS_COLORS.get(sr, ("#6B7280","#F3F4F6"))
-            dias = dias_ate(ct.get("data_termino"))
-            dt   = pd.to_datetime(ct["data_termino"]).strftime("%d/%m/%Y") if ct.get("data_termino") else "—"
-            vt   = brl(ct["valor_total"]) if ct.get("valor_total") else "—"
-            flags = flag_icons(ct)
+    ct_ativos    = [c for c in todos_ct if c["status_real"] in _ATIVOS_SR]
+    ct_vencidos  = [c for c in todos_ct if c["status_real"] in _VENCIDOS_SR]
+    ct_encerrados = [c for c in todos_ct if c["status_real"] in _ENCERR_SR]
 
-            with st.expander(
-                f"**{ct['contratante']}**  ·  {ct.get('empresa_gg','—')}  ·  "
-                f"{ct.get('tipo_contrato','—')}  ·  {sr}  {flags}"
-            ):
-                c1, c2, c3, c4 = st.columns(4)
-                c1.markdown(f"**Empresa:** {ct.get('empresa_gg','—')}")
-                c1.markdown(f"**Tipo:** {ct.get('tipo_contrato','—')}")
-                c1.markdown(f"**Categoria:** {ct.get('categoria','—')}")
-                c1.markdown(f"**Serviço:** {ct.get('servico_principal','—')}")
-
-                c2.markdown(f"**Vencimento:** {dt}")
-                c2.markdown(f"**Assinatura:** {ct.get('data_assinatura','—') or '—'}")
-                if dias is not None:
-                    c2.markdown(f"**Dias restantes:** {'**'+str(dias)+'**' if dias >= 0 else f'⚠️ {abs(dias)}d vencido'}")
-                c2.markdown(f"**Status:** {sr}")
-
-                c3.markdown(f"**Valor total:** {vt}")
-                if ct.get("valor_recorrente"):  c3.markdown(f"**Recorrente:** {brl(ct['valor_recorrente'])}/ano")
-                if ct.get("valor_por_amostra"): c3.markdown(f"**Por amostra:** {brl(ct['valor_por_amostra'])}")
-                if ct.get("comissao_percentual"):c3.markdown(f"**Comissão:** {ct['comissao_percentual']}%")
-                if ct.get("forma_pagamento"):    c3.markdown(f"**Pagamento:** {ct['forma_pagamento']}")
-
-                c4.markdown(f"**País:** {ct.get('pais','Brasil')}")
-                if ct.get("responsavel_interno"): c4.markdown(f"**Responsável:** {ct['responsavel_interno']}")
-                if ct.get("parceiro_relacionado"):c4.markdown(f"**Parceiro:** {ct['parceiro_relacionado']}")
-                if ct.get("plataforma_vinculada"):c4.markdown(f"**Plataforma:** {ct['plataforma_vinculada']}")
-
-                # Compliance flags
-                comp_flags = []
-                if ct.get("lgpd"):                    comp_flags.append("LGPD")
-                if ct.get("confidencialidade"):        comp_flags.append("Confidencialidade")
-                if ct.get("nao_concorrencia"):         comp_flags.append("Não concorrência")
-                if ct.get("propriedade_intelectual"):  comp_flags.append("Prop. Intelectual")
-                if ct.get("compartilhamento_dados"):   comp_flags.append("Compartilhamento dados")
-                if ct.get("internacionalizacao_dados"):comp_flags.append("Internacionalização dados")
-                if comp_flags:
-                    st.markdown(f"**Compliance:** {' · '.join(comp_flags)}")
-
-                # Amostras
-                if ct.get("amostras_contratadas"):
-                    am_ut  = ct.get("amostras_utilizadas",0) or 0
-                    am_ct  = ct["amostras_contratadas"]
-                    am_sal = am_ct - am_ut + (ct.get("amostras_bonus",0) or 0)
-                    ac1, ac2, ac3 = st.columns(3)
-                    ac1.metric("Amostras contratadas", am_ct)
-                    ac2.metric("Amostras utilizadas",  am_ut)
-                    ac3.metric("Saldo amostras",       am_sal)
-
-                if ct.get("observacoes"):  st.caption(f"📝 {ct['observacoes']}")
-                if ct.get("obs_tecnicas"): st.caption(f"🔧 {ct['obs_tecnicas']}")
-
-                # Parcelas (contratos operacionais)
-                parcelas = list_parcelas(ct["id"])
-                if parcelas:
-                    with st.expander(f"📊 {len(parcelas)} parcelas", expanded=False):
-                        df_p = pd.DataFrame(parcelas)[["numero","data_emissao","valor","saldo_atual","situacao","numero_nf"]]
-                        df_p.columns = ["#","Emissão","Valor","Saldo","Situação","NF"]
-                        df_p["Valor"] = df_p["Valor"].apply(brl)
-                        df_p["Saldo"] = df_p["Saldo"].apply(brl)
-                        st.dataframe(df_p.fillna("—"), use_container_width=True, hide_index=True)
-
-                # Ações
-                a1, a2, a3, a4 = st.columns(4)
-                if ct["status_real"] not in ("ENCERRADO","RESCINDIDO"):
-                    if a1.button("⏹️ Encerrar", key=f"enc_{ct['id']}"):
-                        update_contrato(ct["id"], {"status":"ENCERRADO"})
+    def _render_lista(contratos, tab_key):
+        if not contratos:
+            st.info("Nenhum contrato nesta categoria.")
+            return
+        st.markdown(f"**{len(contratos)} contrato(s)**")
+        from collections import defaultdict
+        por_empresa = defaultdict(list)
+        for ct in contratos:
+            por_empresa[ct.get("empresa_gg") or "—"].append(ct)
+        for empresa, contratos_emp in sorted(por_empresa.items()):
+            rec_emp = sum(c.get("valor_recorrente") or 0 for c in contratos_emp)
+            st.markdown(
+                f"<div style='background:#EDE9F8;border-radius:10px;padding:8px 16px;"
+                f"margin:16px 0 6px 0;font-weight:700;color:#4A1259;font-size:.95rem'>"
+                f"🏢 {empresa} &nbsp;·&nbsp; {len(contratos_emp)} contrato(s)"
+                f"{'&nbsp;·&nbsp; Rec.: ' + brl(rec_emp) + '/ano' if rec_emp else ''}"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+            for ct in contratos_emp:
+                sr   = ct["status_real"]
+                cor, bg = STATUS_COLORS.get(sr, ("#6B7280","#F3F4F6"))
+                dias = dias_ate(ct.get("data_termino"))
+                dt   = pd.to_datetime(ct["data_termino"]).strftime("%d/%m/%Y") if ct.get("data_termino") else "—"
+                vt   = brl(ct["valor_total"]) if ct.get("valor_total") else "—"
+                flags = flag_icons(ct)
+                with st.expander(
+                    f"**{ct['contratante']}**  ·  "
+                    f"{ct.get('tipo_contrato','—')}  ·  {sr}  {flags}"
+                ):
+                    c1, c2, c3, c4 = st.columns(4)
+                    c1.markdown(f"**Tipo:** {ct.get('tipo_contrato','—')}")
+                    c1.markdown(f"**Categoria:** {ct.get('categoria','—')}")
+                    c1.markdown(f"**Serviço:** {ct.get('servico_principal','—')}")
+                    c2.markdown(f"**Vencimento:** {dt}")
+                    c2.markdown(f"**Assinatura:** {ct.get('data_assinatura','—') or '—'}")
+                    if dias is not None:
+                        c2.markdown(f"**Dias restantes:** {'**'+str(dias)+'**' if dias >= 0 else f'⚠️ {abs(dias)}d vencido'}")
+                    c2.markdown(f"**Status:** {sr}")
+                    c3.markdown(f"**Valor total:** {vt}")
+                    if ct.get("valor_recorrente"):   c3.markdown(f"**Recorrente:** {brl(ct['valor_recorrente'])}/ano")
+                    if ct.get("valor_por_amostra"):  c3.markdown(f"**Por amostra:** {brl(ct['valor_por_amostra'])}")
+                    if ct.get("comissao_percentual"): c3.markdown(f"**Comissão:** {ct['comissao_percentual']}%")
+                    if ct.get("forma_pagamento"):     c3.markdown(f"**Pagamento:** {ct['forma_pagamento']}")
+                    c4.markdown(f"**País:** {ct.get('pais','Brasil')}")
+                    if ct.get("responsavel_interno"):  c4.markdown(f"**Responsável:** {ct['responsavel_interno']}")
+                    if ct.get("parceiro_relacionado"): c4.markdown(f"**Parceiro:** {ct['parceiro_relacionado']}")
+                    if ct.get("plataforma_vinculada"):  c4.markdown(f"**Plataforma:** {ct['plataforma_vinculada']}")
+                    comp_flags = []
+                    if ct.get("lgpd"):                     comp_flags.append("LGPD")
+                    if ct.get("confidencialidade"):         comp_flags.append("Confidencialidade")
+                    if ct.get("nao_concorrencia"):          comp_flags.append("Não concorrência")
+                    if ct.get("propriedade_intelectual"):   comp_flags.append("Prop. Intelectual")
+                    if ct.get("compartilhamento_dados"):    comp_flags.append("Compartilhamento dados")
+                    if ct.get("internacionalizacao_dados"): comp_flags.append("Internacionalização dados")
+                    if comp_flags:
+                        st.markdown(f"**Compliance:** {' · '.join(comp_flags)}")
+                    if ct.get("amostras_contratadas"):
+                        am_ut  = ct.get("amostras_utilizadas",0) or 0
+                        am_ct  = ct["amostras_contratadas"]
+                        am_sal = am_ct - am_ut + (ct.get("amostras_bonus",0) or 0)
+                        ac1, ac2, ac3 = st.columns(3)
+                        ac1.metric("Amostras contratadas", am_ct)
+                        ac2.metric("Amostras utilizadas",  am_ut)
+                        ac3.metric("Saldo amostras",       am_sal)
+                    if ct.get("observacoes"):  st.caption(f"📝 {ct['observacoes']}")
+                    if ct.get("obs_tecnicas"): st.caption(f"🔧 {ct['obs_tecnicas']}")
+                    parcelas = list_parcelas(ct["id"])
+                    if parcelas:
+                        with st.expander(f"📊 {len(parcelas)} parcelas", expanded=False):
+                            df_p = pd.DataFrame(parcelas)[["numero","data_emissao","valor","saldo_atual","situacao","numero_nf"]]
+                            df_p.columns = ["#","Emissão","Valor","Saldo","Situação","NF"]
+                            df_p["Valor"] = df_p["Valor"].apply(brl)
+                            df_p["Saldo"] = df_p["Saldo"].apply(brl)
+                            st.dataframe(df_p.fillna("—"), use_container_width=True, hide_index=True)
+                    a1, a2, a3, a4 = st.columns(4)
+                    if ct["status_real"] not in ("ENCERRADO","RESCINDIDO"):
+                        if a1.button("⏹️ Encerrar", key=f"enc_{tab_key}_{ct['id']}"):
+                            update_contrato(ct["id"], {"status":"ENCERRADO"})
+                            st.rerun()
+                        if a2.button("📝 Editar", key=f"edit_{tab_key}_{ct['id']}"):
+                            st.session_state["_editar_ct_id"] = ct["id"]
+                            st.rerun()
+                    else:
+                        if a1.button("🔄 Reativar", key=f"reativ_{tab_key}_{ct['id']}"):
+                            update_contrato(ct["id"], {"status":"ATIVO"})
+                            st.rerun()
+                    if a4.button("🗑️ Excluir", key=f"del_{tab_key}_{ct['id']}"):
+                        delete_contrato(ct["id"])
                         st.rerun()
-                    if a2.button("📝 Editar", key=f"edit_{ct['id']}"):
-                        st.session_state["_editar_ct_id"] = ct["id"]
-                        st.rerun()
-                else:
-                    if a1.button("🔄 Reativar", key=f"reativ_{ct['id']}"):
-                        update_contrato(ct["id"], {"status":"ATIVO"})
-                        st.rerun()
-                if a4.button("🗑️ Excluir", key=f"del_{ct['id']}"):
-                    delete_contrato(ct["id"])
-                    st.rerun()
+
+    stab_at, stab_venc, stab_enc = st.tabs([
+        f"✅ Ativos ({len(ct_ativos)})",
+        f"⏰ Vencidos ({len(ct_vencidos)})",
+        f"🔒 Encerrados ({len(ct_encerrados)})",
+    ])
+    with stab_at:
+        _render_lista(ct_ativos, "at")
+    with stab_venc:
+        _render_lista(ct_vencidos, "venc")
+    with stab_enc:
+        _render_lista(ct_encerrados, "enc")
 
     # Exportar
     if todos_ct:
