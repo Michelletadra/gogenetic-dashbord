@@ -13,12 +13,19 @@ def _backend_mod():
         return _mod
     # Prefere Supabase se a URL estiver disponível (env ou st.secrets)
     supabase_url = os.getenv("SUPABASE_URL", "")
+    _debug = f"env={bool(supabase_url)}"
     if not supabase_url:
         try:
             import streamlit as st
             supabase_url = st.secrets["SUPABASE_URL"]
-        except Exception:
-            pass
+            _debug += f" secrets=OK url={supabase_url[:20]}"
+        except Exception as _e:
+            _debug += f" secrets_err={_e}"
+    try:
+        import streamlit as st
+        st.session_state["_db_debug"] = _debug
+    except Exception:
+        pass
     if supabase_url:
         import db_contratos_supabase as m
     else:

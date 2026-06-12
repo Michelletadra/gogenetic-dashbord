@@ -19,7 +19,9 @@ from db_creditos import list_clientes
 # DEBUG TEMPORÁRIO
 try:
     _backend_name = _db_mod._backend_mod().__name__
+    _debug_info = st.session_state.get("_db_debug", "")
     st.sidebar.caption(f"🗄 DB: {_backend_name}")
+    st.sidebar.caption(f"🔍 {_debug_info}")
 except Exception as _e:
     st.sidebar.caption(f"🗄 DB erro: {_e}")
 
