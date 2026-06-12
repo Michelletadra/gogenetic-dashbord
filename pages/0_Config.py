@@ -2,7 +2,7 @@
 import streamlit as st
 from utils import require_auth, GLOBAL_CSS, reset_bling_client
 
-st.set_page_config(page_title="Configurações · GoGenetic", page_icon="⚙️", layout="wide")
+st.set_page_config(page_title="Config · GoGenetic", page_icon="⚙️", layout="wide")
 st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
 require_auth()
 
