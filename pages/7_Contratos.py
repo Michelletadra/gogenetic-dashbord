@@ -43,6 +43,7 @@ CATEGORIAS = ["Kits moleculares","Microbioma de solo","Metagenômica","SaaS + ge
               "Escala industrial","Equipamentos","Consultoria técnica","Desenvolvimento",
               "Pesquisa microbiológica","Internacional","Outro"]
 EMPRESAS  = ["GG SOLUÇÕES","GOSOLOS","GOGENETIC","GG PESQUISA"]
+_EMPRESA_LABEL = {"GOGENETIC": "Gogenetic You"}
 INDICES   = ["IPCA","IGP-M","SELIC","INPC","Fixo","Outro"]
 MOEDAS    = ["BRL","USD","EUR","GBP","JPY"]
 PAGAMENTOS= ["Mensal","Trimestral","Semestral","Anual","Por parcela","Por amostra","Pontual"]
@@ -230,10 +231,11 @@ with tab_lista:
             por_empresa[ct.get("empresa_gg") or "—"].append(ct)
         for empresa, contratos_emp in sorted(por_empresa.items()):
             rec_emp = sum(c.get("valor_recorrente") or 0 for c in contratos_emp)
+            empresa_label = _EMPRESA_LABEL.get(empresa, empresa)
             st.markdown(
                 f"<div style='background:#EDE9F8;border-radius:10px;padding:8px 16px;"
                 f"margin:16px 0 6px 0;font-weight:700;color:#4A1259;font-size:.95rem'>"
-                f"🏢 {empresa} &nbsp;·&nbsp; {len(contratos_emp)} contrato(s)"
+                f"🏢 {empresa_label} &nbsp;·&nbsp; {len(contratos_emp)} contrato(s)"
                 f"{'&nbsp;·&nbsp; Rec.: ' + brl(rec_emp) + '/ano' if rec_emp else ''}"
                 f"</div>",
                 unsafe_allow_html=True,
