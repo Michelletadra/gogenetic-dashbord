@@ -115,7 +115,7 @@ with tab_painel:
 
     st.markdown("<br>", unsafe_allow_html=True)
     k2 = st.columns(5)
-    _kpi(k2[0],"💰","Rec. Recorrente",brl(res["receita_recorrente"]),     "/ano","#10B981")
+    _kpi(k2[0],"💰","Valor Ativos",   brl(res["valor_total_ativo"]),      "total","#10B981")
     _kpi(k2[1],"🌍","Internacionais", str(res["qtd_internacionais"]),     "contratos","#3B82F6")
     _kpi(k2[2],"🏷️","White Label",   str(res["qtd_white_label"]),        "contratos","#8B5CF6")
     _kpi(k2[3],"♻️","Renov. Auto",   str(res["qtd_renovacao_auto"]),     "contratos","#10B981")
