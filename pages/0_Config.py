@@ -1,6 +1,6 @@
 """Página de configuração — reconectar Bling via OAuth."""
 import streamlit as st
-from utils import require_auth, GLOBAL_CSS, reset_bling_client
+from utils import require_auth, GLOBAL_CSS
 
 st.set_page_config(page_title="Config · GoGenetic", page_icon="⚙️", layout="wide")
 st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
@@ -23,7 +23,7 @@ if code:
     with st.spinner("Trocando código por tokens..."):
         try:
             tokens = bling_auth.exchange_code(code)
-            reset_bling_client()
+            import utils as _u; _u._bling_client_holder()["client"] = None
             st.success("✅ Bling conectado com sucesso! Tokens salvos.")
             st.query_params.clear()
         except Exception as e:
