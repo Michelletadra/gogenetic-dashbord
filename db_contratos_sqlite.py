@@ -4,6 +4,7 @@ from pathlib import Path
 from datetime import date
 
 DB_PATH = Path(__file__).parent / "data" / "creditos.db"
+DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 def _conn():
     conn = sqlite3.connect(str(DB_PATH))
