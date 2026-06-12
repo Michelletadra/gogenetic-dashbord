@@ -35,10 +35,6 @@ if token:
 else:
     st.warning("⚠️ Bling não conectado")
     url = bling_auth.get_auth_url()
-    st.markdown(
-        f'<a href="{url}" target="_self" style="display:inline-block;padding:10px 20px;'
-        f'background:#13CFE8;color:#190E33;border-radius:8px;font-weight:600;text-decoration:none;">'
-        f'🔗 Conectar Bling</a>',
-        unsafe_allow_html=True,
-    )
-    st.caption("Você será redirecionado ao Bling para autorizar. Após aprovar, volte e faça login.")
+    st.link_button("🔗 Conectar Bling", url)
+    st.caption(f"URL de autorização: {url}")
+    st.caption("Clique no botão acima. Após aprovar no Bling, você será redirecionado de volta para cá.")
