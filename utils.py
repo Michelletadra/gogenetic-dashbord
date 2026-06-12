@@ -390,7 +390,7 @@ def get_clients() -> dict:
     return {e["nome"]: EgestorClient(e["token"], e["nome"]) for e in empresas}
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=900, show_spinner=False)
 def load_company_data(nome: str, dt_ini: str, dt_fim: str) -> dict:
     """Carrega os 4 endpoints em paralelo para reduzir latência."""
     from concurrent.futures import ThreadPoolExecutor
@@ -437,20 +437,35 @@ def load_vendas_ano(nome: str, ano: int) -> list:
 
 # ── Bling (GoGenetic You) ──────────────────────────────────────────────────────
 
+@st.cache_resource
+def _bling_client_holder() -> dict:
+    """Container mutável cacheado para o BlingClient."""
+    return {"client": None}
+
+
 def get_bling_client():
     """Retorna BlingClient se autenticado, None caso contrário."""
+    holder = _bling_client_holder()
+    if holder["client"] is not None:
+        return holder["client"]
     try:
         import bling_auth
         import bling_api
         token = bling_auth.get_valid_token()
         if token:
-            return bling_api.BlingClient(token, NOME_YOU)
+            holder["client"] = bling_api.BlingClient(token, NOME_YOU)
+            return holder["client"]
     except Exception:
         pass
     return None
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+def reset_bling_client():
+    """Força recriação do BlingClient (após novo OAuth)."""
+    _bling_client_holder()["client"] = None
+
+
+@st.cache_data(ttl=900, show_spinner=False)
 def load_bling_data(dt_ini: str, dt_fim: str) -> dict:
     from concurrent.futures import ThreadPoolExecutor
     client = get_bling_client()
@@ -546,7 +561,7 @@ def load_vencidas_unificado(nome: str) -> dict:
 
 # ── Realizado (despesas pagas) ────────────────────────────────────────────────
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=900, show_spinner=False)
 def load_pagamentos_realizados(nome: str, dt_ini: str, dt_fim: str) -> list:
     """Carrega pagamentos efetivamente pagos (situFin=30) de uma empresa eGestor."""
     client = get_clients().get(nome)
