@@ -5,7 +5,7 @@ from typing import Optional
 
 import requests
 
-API_URL = "https://www.bling.com.br/Api/v3"
+API_URL = "https://api.bling.com.br/Api/v3"
 
 
 class BlingClient:
