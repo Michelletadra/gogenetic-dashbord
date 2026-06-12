@@ -15,7 +15,7 @@ def _backend_mod():
     if not supabase_url:
         try:
             import streamlit as st
-            supabase_url = st.secrets.get("SUPABASE_URL", "")
+            supabase_url = st.secrets["SUPABASE_URL"]
         except Exception:
             pass
     if supabase_url:
