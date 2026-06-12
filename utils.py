@@ -607,30 +607,17 @@ def load_bling_categorias() -> dict:
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def load_bling_pagamentos_realizados(dt_ini: str, dt_fim: str) -> list:
-    """Contas a pagar pagas do Bling, com categoria enriquecida (cache 1h).
-    Busca detalhes individuais em paralelo para obter categoria.id e historico.
+    """Contas a pagar pagas do Bling (cache 1h). Usa apenas a lista — sem chamadas
+    individuais por pagamento. Categoria vem do campo 'historico' da lista.
     """
     client = get_bling_client()
     if not client:
         return []
     try:
         from bling_api import BlingClient
-        from concurrent.futures import ThreadPoolExecutor
-
-        raw      = client.get_pagamentos_realizados(dt_ini, dt_fim)
-        cat_map  = load_bling_categorias()
-
-        # Busca detalhes individuais em paralelo (max 3 workers = ~3 req/s)
-        ids = [r["id"] for r in raw]
-        with ThreadPoolExecutor(max_workers=3) as ex:
-            details = list(ex.map(client.get_pagamento_detalhe, ids))
-
-        # Usa o detalhe quando disponível, fallback para o registro da lista
-        enriched = []
-        for r_list, r_det in zip(raw, details):
-            base = {**r_list, **r_det} if r_det else r_list
-            enriched.append(BlingClient.normaliza_pagamento_realizado(base, cat_map))
-        return enriched
+        raw     = client.get_pagamentos_realizados(dt_ini, dt_fim)
+        cat_map = load_bling_categorias()
+        return [BlingClient.normaliza_pagamento_realizado(r, cat_map) for r in raw]
     except Exception as exc:
         import streamlit as _st
         _st.error(f"Erro Bling realizados: {exc}")
