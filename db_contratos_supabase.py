@@ -26,7 +26,7 @@ def _sb():
 def compute_status(data_termino, renovacao_automatica, status_manual="ATIVO"):
     """Calcula status real com base em datas. Respeita overrides manuais."""
     import pandas as pd
-    MANUAL_OVERRIDES = {"ENCERRADO", "RESCINDIDO", "EM NEGOCIAÇÃO", "SUSPENSO"}
+    MANUAL_OVERRIDES = {"ENCERRADO", "RESCINDIDO", "EM NEGOCIAÇÃO", "SUSPENSO", "VENCIDO"}
     if status_manual in MANUAL_OVERRIDES:
         return status_manual
     if not data_termino:
