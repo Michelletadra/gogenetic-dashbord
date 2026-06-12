@@ -7,7 +7,6 @@ import plotly.express as px
 import streamlit as st
 
 from utils import GLOBAL_CSS, brl, sidebar_header, require_auth
-import db_contratos as _db_mod
 from db_contratos import (
     list_contratos, get_contrato, insert_contrato, update_contrato, delete_contrato,
     list_parcelas, insert_parcela, delete_parcela,
@@ -15,15 +14,6 @@ from db_contratos import (
     resumo_contratos, compute_status,
 )
 from db_creditos import list_clientes
-
-# DEBUG TEMPORÁRIO
-try:
-    _backend_name = _db_mod._backend_mod().__name__
-    _debug_info = st.session_state.get("_db_debug", "")
-    st.sidebar.caption(f"🗄 DB: {_backend_name}")
-    st.sidebar.caption(f"🔍 {_debug_info}")
-except Exception as _e:
-    st.sidebar.caption(f"🗄 DB erro: {_e}")
 
 st.set_page_config(page_title="Contratos | GoGenetic", page_icon="📑", layout="wide")
 st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
