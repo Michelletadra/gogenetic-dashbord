@@ -511,10 +511,20 @@ with tab_creditos:
                 valor   = c2.number_input("Valor (R$) *", min_value=0.01, step=0.01, format="%.2f")
                 venc    = c1.date_input("Vencimento *")
                 obs     = c2.text_area("Observações", height=80)
+                # Vínculo com contrato
+                _contratos_all = _list_contratos_all()
+                _ct_opts = {"— Sem contrato —": None}
+                _ct_opts.update({
+                    f"{c['contratante']} ({c['empresa_gg']}) · {c.get('tipo_contrato','—')}": c["id"]
+                    for c in _contratos_all
+                    if c["status_real"] not in ("ENCERRADO","RESCINDIDO")
+                })
+                ct_sel = st.selectbox("Contrato vinculado", list(_ct_opts.keys()))
                 if st.form_submit_button("➕ Cadastrar", use_container_width=True):
                     insert_credito({"cliente_id": cli_opts[cli_sel], "nota_fiscal_id": nf_opts[nf_sel],
                                     "valor_original": float(valor), "data_vencimento": str(venc),
-                                    "observacoes": obs or None})
+                                    "observacoes": obs or None,
+                                    "contrato_id": _ct_opts[ct_sel]})
                     st.success("✅ Crédito cadastrado!")
                     _clear_and_rerun()
 

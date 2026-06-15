@@ -42,6 +42,7 @@ def init_db():
             id               INTEGER PRIMARY KEY AUTOINCREMENT,
             cliente_id       INTEGER REFERENCES clientes(id) ON DELETE CASCADE,
             nota_fiscal_id   INTEGER REFERENCES notas_fiscais(id) ON DELETE SET NULL,
+            contrato_id      INTEGER REFERENCES contratos(id) ON DELETE SET NULL,
             valor_original   REAL NOT NULL,
             valor_utilizado  REAL DEFAULT 0,
             data_vencimento  TEXT,
@@ -145,7 +146,7 @@ def delete_nota(id: int):
         conn.execute("DELETE FROM notas_fiscais WHERE id=?", (id,))
 
 # ── Créditos ──────────────────────────────────────────────────────────────────
-def list_creditos(status: list = None, cliente_id: int = None):
+def list_creditos(status: list = None, cliente_id: int = None, contrato_id: int = None):
     with _conn() as conn:
         sql = """SELECT cr.*, c.nome as cliente_nome, nf.numero_nf
                  FROM creditos cr
@@ -159,6 +160,9 @@ def list_creditos(status: list = None, cliente_id: int = None):
         if cliente_id:
             sql += " AND cr.cliente_id=?"
             params.append(cliente_id)
+        if contrato_id:
+            sql += " AND cr.contrato_id=?"
+            params.append(contrato_id)
         sql += " ORDER BY cr.data_vencimento"
         rows = conn.execute(sql, params).fetchall()
     return [dict(r) for r in rows]

@@ -13,7 +13,7 @@ from db_contratos import (
     list_aditivos, insert_aditivo, delete_aditivo,
     resumo_contratos, compute_status,
 )
-from db_creditos import list_clientes
+from db_creditos import list_clientes, list_creditos
 
 st.set_page_config(page_title="Contratos | GoGenetic", page_icon="📑", layout="wide")
 st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
@@ -296,6 +296,21 @@ with tab_lista:
                             df_p["Valor"] = df_p["Valor"].apply(brl)
                             df_p["Saldo"] = df_p["Saldo"].apply(brl)
                             st.dataframe(df_p.fillna("—"), use_container_width=True, hide_index=True)
+                    creditos_ct = list_creditos(contrato_id=ct["id"])
+                    if creditos_ct:
+                        with st.expander(f"💳 {len(creditos_ct)} crédito(s) vinculado(s)", expanded=False):
+                            for cr in creditos_ct:
+                                saldo = (cr.get("valor_original") or 0) - (cr.get("valor_utilizado") or 0)
+                                st.markdown(
+                                    f"**{cr.get('cliente_nome','—')}** &nbsp;·&nbsp; "
+                                    f"NF {cr.get('numero_nf','—')} &nbsp;·&nbsp; "
+                                    f"Original: {brl(cr.get('valor_original') or 0)} &nbsp;·&nbsp; "
+                                    f"Saldo: **{brl(saldo)}** &nbsp;·&nbsp; "
+                                    f"Status: {cr.get('status','—')} &nbsp;·&nbsp; "
+                                    f"Venc.: {cr.get('data_vencimento','—') or '—'}"
+                                )
+                    elif ct["status_real"] not in ("ENCERRADO","RESCINDIDO"):
+                        st.caption("💳 Nenhum crédito vinculado — acesse Créditos para adicionar.")
                     a1, a2, a3, a4 = st.columns(4)
                     if ct["status_real"] not in ("ENCERRADO","RESCINDIDO"):
                         if a1.button("⏹️ Encerrar", key=f"enc_{tab_key}_{ct['id']}"):

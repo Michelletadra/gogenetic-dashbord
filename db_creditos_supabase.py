@@ -68,12 +68,14 @@ def delete_nota(id):
     _sb().table("notas_fiscais").delete().eq("id", id).execute()
 
 # ── Créditos ──────────────────────────────────────────────────────────────────
-def list_creditos(status=None, cliente_id=None):
+def list_creditos(status=None, cliente_id=None, contrato_id=None):
     q = _sb().table("creditos").select("*, clientes(nome), notas_fiscais(numero_nf)").order("data_vencimento")
     if status:
         q = q.in_("status", status)
     if cliente_id:
         q = q.eq("cliente_id", cliente_id)
+    if contrato_id:
+        q = q.eq("contrato_id", contrato_id)
     rows = q.execute().data
     for r in rows:
         r["cliente_nome"] = (r.pop("clientes", None) or {}).get("nome", "")
