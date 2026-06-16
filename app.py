@@ -77,10 +77,22 @@ st.markdown("""
 dt_ini = date.today().replace(day=1).strftime("%Y-%m-%d")
 dt_fim = date.today().strftime("%Y-%m-%d")
 
-with st.spinner("Carregando dados..."):
-    raw = {nome: load_company_data(nome, dt_ini, dt_fim) for nome in NOMES}
-    if bling_auth.is_connected():
-        raw[NOME_YOU] = load_bling_data(dt_ini, dt_fim)
+_placeholder = st.empty()
+with _placeholder.container():
+    st.info("⏳ Carregando dados das empresas... Isso pode levar alguns segundos na primeira vez.")
+
+from concurrent.futures import ThreadPoolExecutor
+
+def _load(nome):
+    return nome, load_company_data(nome, dt_ini, dt_fim)
+
+with ThreadPoolExecutor(max_workers=len(NOMES)) as ex:
+    raw = dict(ex.map(lambda n: _load(n), NOMES))
+
+if bling_auth.is_connected():
+    raw[NOME_YOU] = load_bling_data(dt_ini, dt_fim)
+
+_placeholder.empty()
 
 empresas_visiveis = NOMES + ([NOME_YOU] if bling_auth.is_connected() else [])
 
