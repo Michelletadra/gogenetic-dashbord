@@ -18,9 +18,17 @@ if code:
     with st.spinner("Trocando código por tokens..."):
         try:
             tokens = bling_auth.exchange_code(code)
-            st.success("✅ Bling conectado com sucesso!")
-            st.markdown(f"**Access token:** `{tokens.get('access_token','')[:30]}...`")
+            st.success("✅ Bling conectado com sucesso! Tokens salvos no Supabase.")
             st.markdown(f"**Expira em:** {tokens.get('expires_at','—')}")
+            st.markdown("---")
+            st.markdown("**Atualize também nos Secrets do Streamlit Cloud como backup:**")
+            st.code(f"""[bling_tokens]
+access_token = "{tokens.get('access_token','')}"
+expires_in = "{tokens.get('expires_in','21600')}"
+token_type = "Bearer"
+refresh_token = "{tokens.get('refresh_token','')}"
+expires_at = "{tokens.get('expires_at','')}"
+""", language="toml")
             st.query_params.clear()
         except Exception as e:
             st.error(f"Erro ao trocar código: {e}")

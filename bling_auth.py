@@ -111,8 +111,12 @@ def _supabase_save(tokens: dict):
         sb.table("settings").upsert(
             {"key": "bling_tokens", "value": tokens}
         ).execute()
-    except Exception:
-        pass
+    except Exception as e:
+        try:
+            import streamlit as st
+            st.warning(f"⚠️ Não foi possível salvar token Bling no Supabase: {e}")
+        except Exception:
+            pass
 
 
 def _supabase_load() -> dict:
