@@ -94,6 +94,8 @@ with st.spinner("Carregando serviços..."):
     todos = load_servicos(dt_ini_str, dt_fim_str)
 
 # ── Aplica filtros ─────────────────────────────────────────────────────────────
+def _sit(s): return (s.get("situacaoOS") or "").strip()
+
 filtrados = todos
 if status_sel:
     filtrados = [s for s in filtrados if _sit(s) in status_sel]
@@ -110,7 +112,6 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # ── KPIs ───────────────────────────────────────────────────────────────────────
-def _sit(s): return (s.get("situacaoOS") or "").strip()
 em_exec   = [s for s in todos if _sit(s) == "Em execução"]
 aprovados = [s for s in todos if _sit(s) == "Aprovado"]
 a_faturar = [s for s in todos if _sit(s) == "Faturar"]
