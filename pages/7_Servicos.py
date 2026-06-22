@@ -96,7 +96,7 @@ with st.spinner("Carregando serviços..."):
 # ── Aplica filtros ─────────────────────────────────────────────────────────────
 filtrados = todos
 if status_sel:
-    filtrados = [s for s in filtrados if s.get("situacaoOS") in status_sel]
+    filtrados = [s for s in filtrados if _sit(s) in status_sel]
 if busca:
     b = busca.lower()
     filtrados = [s for s in filtrados
@@ -110,11 +110,12 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # ── KPIs ───────────────────────────────────────────────────────────────────────
-em_exec   = [s for s in todos if s.get("situacaoOS") == "Em execução"]
-aprovados = [s for s in todos if s.get("situacaoOS") == "Aprovado"]
-a_faturar = [s for s in todos if s.get("situacaoOS") == "Faturar"]
-invoice   = [s for s in todos if s.get("situacaoOS") == "Invoice"]
-em_espera = [s for s in todos if s.get("situacaoOS") == "Em espera"]
+def _sit(s): return (s.get("situacaoOS") or "").strip()
+em_exec   = [s for s in todos if _sit(s) == "Em execução"]
+aprovados = [s for s in todos if _sit(s) == "Aprovado"]
+a_faturar = [s for s in todos if _sit(s) == "Faturar"]
+invoice   = [s for s in todos if _sit(s) == "Invoice"]
+em_espera = [s for s in todos if _sit(s) == "Em espera"]
 
 c1, c2, c3, c4, c5 = st.columns(5)
 kpi_card(c1, "⚡", "Em Execução", brl(soma(em_exec,   "valorTotal")), f"{len(em_exec)} serviços",   border="#7E16B8")
@@ -128,7 +129,7 @@ if filtrados:
     df = pd.DataFrame(filtrados)
     df["valorTotal"]   = pd.to_numeric(df["valorTotal"], errors="coerce").fillna(0)
     df["dtVenda"]      = pd.to_datetime(df["dtVenda"], errors="coerce")
-    df["situacaoOS"]   = df["situacaoOS"].fillna("—").astype(str)
+    df["situacaoOS"]   = df["situacaoOS"].fillna("").str.strip().replace("", "—").astype(str)
     df["nomeContato"]  = df["nomeContato"].fillna("—").astype(str)
     df["nomeVendedor"] = df.get("nomeVendedor", pd.Series(dtype=str)).fillna("—").astype(str)
     if "nomeVendedor" not in df.columns:
@@ -199,7 +200,7 @@ else:
     df_show = pd.DataFrame(filtrados)
     df_show["valorTotal"] = pd.to_numeric(df_show["valorTotal"], errors="coerce").fillna(0)
     df_show["dtVenda"]    = pd.to_datetime(df_show["dtVenda"], errors="coerce").dt.strftime("%d/%m/%Y")
-    df_show["situacaoOS"] = df_show["situacaoOS"].fillna("—")
+    df_show["situacaoOS"] = df_show["situacaoOS"].fillna("").str.strip().replace("", "—")
     df_show["nomeContato"]  = df_show["nomeContato"].fillna("—")
     df_show["nomeVendedor"] = df_show.get("nomeVendedor", pd.Series(dtype=str)).fillna("—")
 
@@ -217,7 +218,7 @@ else:
     df_base = pd.DataFrame(filtrados)
     df_base["valorTotal"]   = pd.to_numeric(df_base["valorTotal"], errors="coerce").fillna(0)
     df_base["dtVenda_sort"] = pd.to_datetime(df_base["dtVenda"], errors="coerce")
-    df_base["situacaoOS"]   = df_base["situacaoOS"].fillna("—")
+    df_base["situacaoOS"]   = df_base["situacaoOS"].fillna("").str.strip().replace("", "—")
     df_base["nomeContato"]  = df_base["nomeContato"].fillna("—")
     df_base["nomeVendedor"] = df_base.get("nomeVendedor", pd.Series(dtype=str)).fillna("—")
     df_base["Dias em execução"] = (
