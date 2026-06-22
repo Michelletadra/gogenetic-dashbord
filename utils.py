@@ -170,8 +170,24 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
     background: #1E1535 !important;
     border-right: 1px solid rgba(126,22,184,0.15) !important;
 }
-[data-testid="stSidebarNav"] a { color: #D4C8EE !important; font-size: .88rem !important; }
-[data-testid="stSidebarNav"] a:hover { color: #FFFFFF !important; }
+[data-testid="stSidebarNav"] a {
+    color: #D4C8EE !important;
+    font-size: .88rem !important;
+    border-radius: 8px !important;
+    padding: 6px 12px !important;
+    display: block !important;
+    transition: background 0.15s !important;
+}
+[data-testid="stSidebarNav"] a:hover {
+    color: #FFFFFF !important;
+    background: rgba(126,22,184,0.25) !important;
+}
+[data-testid="stSidebarNav"] a[aria-current="page"] {
+    color: #FFFFFF !important;
+    background: rgba(126,22,184,0.5) !important;
+    border-left: 3px solid #A855F7 !important;
+    font-weight: 600 !important;
+}
 [data-testid="stSidebar"] label { color: #A899C4 !important; font-size: .78rem !important; font-weight: 500 !important; }
 [data-testid="stSidebar"] [data-baseweb="select"] > div {
     background: #2A1D4A !important;
