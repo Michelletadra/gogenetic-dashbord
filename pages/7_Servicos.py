@@ -15,6 +15,7 @@ COR_STATUS = {
     "Em execução":        "#7E16B8",
     "Aprovado":           "#10B981",
     "Faturar":            "#3B82F6",
+    "Invoice":            "#F97316",
     "Em espera":          "#F59E0B",
     "Cotação":            "#8B6BAE",
     "Proposta":           "#A899C4",
@@ -22,7 +23,7 @@ COR_STATUS = {
     "NF Emitida":         "#6B7280",
 }
 
-STATUS_ATIVOS = ["Em execução", "Aprovado", "Faturar", "Em espera", "Consumo de crédito"]
+STATUS_ATIVOS = ["Em execução", "Aprovado", "Faturar", "Invoice", "Em espera", "Consumo de crédito"]
 STATUS_TODOS  = list(COR_STATUS.keys())
 
 # ── Sidebar ────────────────────────────────────────────────────────────────────
@@ -112,13 +113,15 @@ st.markdown(f"""
 em_exec   = [s for s in todos if s.get("situacaoOS") == "Em execução"]
 aprovados = [s for s in todos if s.get("situacaoOS") == "Aprovado"]
 a_faturar = [s for s in todos if s.get("situacaoOS") == "Faturar"]
+invoice   = [s for s in todos if s.get("situacaoOS") == "Invoice"]
 em_espera = [s for s in todos if s.get("situacaoOS") == "Em espera"]
 
-c1, c2, c3, c4 = st.columns(4)
+c1, c2, c3, c4, c5 = st.columns(5)
 kpi_card(c1, "⚡", "Em Execução", brl(soma(em_exec,   "valorTotal")), f"{len(em_exec)} serviços",   border="#7E16B8")
 kpi_card(c2, "✅", "Aprovados",   brl(soma(aprovados, "valorTotal")), f"{len(aprovados)} serviços", border="#10B981")
 kpi_card(c3, "💰", "A Faturar",   brl(soma(a_faturar, "valorTotal")), f"{len(a_faturar)} serviços", border="#3B82F6")
-kpi_card(c4, "⏳", "Em Espera",   brl(soma(em_espera, "valorTotal")), f"{len(em_espera)} serviços", border="#F59E0B")
+kpi_card(c4, "🧾", "Invoice",     brl(soma(invoice,   "valorTotal")), f"{len(invoice)} serviços",   border="#F97316")
+kpi_card(c5, "⏳", "Em Espera",   brl(soma(em_espera, "valorTotal")), f"{len(em_espera)} serviços", border="#F59E0B")
 
 # ── Gráficos ───────────────────────────────────────────────────────────────────
 if filtrados:
@@ -227,20 +230,22 @@ else:
                        else df_base["situacaoOS"] == status]
         return df_f.sort_values("dtVenda_sort", ascending=asc)
 
-    df_exec     = _filtro("Em execução",       asc=True)   # mais antigos primeiro
-    df_aprov    = _filtro("Aprovado",           asc=False)
-    df_faturar  = _filtro("Faturar",            asc=False)
-    df_credito  = _filtro("Consumo de crédito", asc=False)
-    df_espera   = _filtro("Em espera",          asc=False)
+    df_exec      = _filtro(["Em execução", "Invoice"], asc=True)
+    df_aprov     = _filtro("Aprovado",                 asc=False)
+    df_faturar   = _filtro(["Faturar", "Invoice"],     asc=False)
+    df_invoice   = _filtro("Invoice",                  asc=False)
+    df_credito   = _filtro("Consumo de crédito",       asc=False)
+    df_espera    = _filtro("Em espera",                asc=False)
     df_concluido = _filtro(["NF Emitida", "Cotação", "Proposta"], asc=False)
 
-    tab_exec, tab_aprov, tab_fat, tab_cred, tab_esp, tab_conc = st.tabs([
+    tab_exec, tab_aprov, tab_fat, tab_inv, tab_cred, tab_esp, tab_conc = st.tabs([
         f"⚡ Em Execução ({len(df_exec)})",
         f"✅ Aprovados ({len(df_aprov)})",
         f"💰 A Faturar ({len(df_faturar)})",
+        f"🧾 Invoice ({len(df_invoice)})",
         f"🎯 Consumo Crédito ({len(df_credito)})",
         f"⏳ Em Espera ({len(df_espera)})",
-        f"🧾 Concluídos / Outros ({len(df_concluido)})",
+        f"📁 Concluídos / Outros ({len(df_concluido)})",
     ])
 
     def tabela_servico(df_t: pd.DataFrame, key_suffix: str):
@@ -303,13 +308,20 @@ else:
             )
 
     with tab_exec:
+        if not df_invoice.empty:
+            st.caption(f"⚠️ Inclui {len(df_invoice)} serviço(s) com situação **Invoice**")
         tabela_servico(df_exec, "execucao")
 
     with tab_aprov:
         tabela_servico(df_aprov, "aprovados")
 
     with tab_fat:
+        if not df_invoice.empty:
+            st.caption(f"⚠️ Inclui {len(df_invoice)} serviço(s) com situação **Invoice**")
         tabela_servico(df_faturar, "faturar")
+
+    with tab_inv:
+        tabela_servico(df_invoice, "invoice")
 
     with tab_cred:
         tabela_servico(df_credito, "credito")
