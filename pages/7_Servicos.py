@@ -5,7 +5,7 @@ import pandas as pd
 import plotly.express as px
 from datetime import date, timedelta
 from utils import (GLOBAL_CSS, BRAND, brl, soma, kpi_card, plotly_layout,
-                   sidebar_header, get_clients)
+                   sidebar_header, get_clients, tabela_marcavel)
 
 st.set_page_config(page_title="Serviços | GoGenetic", page_icon="🔬", layout="wide")
 st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
@@ -258,13 +258,9 @@ else:
         df_render = df_t[existing].rename(columns=cols_map).copy()
         df_render["Valor"] = df_render["Valor"].apply(brl)
 
-        event = st.dataframe(
+        sel_rows, _ = tabela_marcavel(
             df_render,
-            use_container_width=True,
-            hide_index=True,
-            selection_mode="multi-row",
-            on_select="rerun",
-            key=f"tbl_{key_suffix}",
+            key=key_suffix,
             column_config={
                 "Dias":        st.column_config.NumberColumn("Dias", help="Dias desde a abertura do serviço", width="small"),
                 "Situação OS": st.column_config.TextColumn("Situação OS", width="medium"),
@@ -272,9 +268,8 @@ else:
                 "Valor":       st.column_config.TextColumn("Valor",       width="small"),
             },
         )
-        sel_rows = event.selection.rows if event.selection else []
-        col_info, col_soma, col_export = st.columns([2, 2, 1])
 
+        col_info, col_soma, col_export = st.columns([2, 2, 1])
         df_num_t = df_t.copy()
 
         with col_info:

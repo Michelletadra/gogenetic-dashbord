@@ -9,7 +9,8 @@ from utils import (GLOBAL_CSS, BRAND, NOMES, CHART_COLORS,
                    load_company_data, load_vencidas,
                    get_empresas_disponiveis, load_data_unificado,
                    load_vencidas_unificado,
-                   load_companies_data, load_companies_vencidas)
+                   load_companies_data, load_companies_vencidas,
+                   tabela_marcavel)
 
 st.set_page_config(page_title="Contas | GoGenetic", page_icon="💳", layout="wide")
 st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
@@ -207,25 +208,22 @@ def to_excel_bytes(df: pd.DataFrame) -> bytes:
     return buf.getvalue()
 
 
+_contas_tab_counter = {"n": 0}
+
 def tabela_interativa(items: list, cols_map: dict, valor_campo: str = "valor",
                       nome_arquivo: str = "contas"):
     if not items:
         st.info("Nenhum registro no período.")
         return
 
+    _contas_tab_counter["n"] += 1
+    tab_key = f"{nome_arquivo}_{_contas_tab_counter['n']}"
+
     df_num  = pd.DataFrame(items)
     df_num[valor_campo] = pd.to_numeric(df_num[valor_campo], errors="coerce").fillna(0)
     df_show = prep_df(items, cols_map)
 
-    event = st.dataframe(
-        df_show,
-        use_container_width=True,
-        hide_index=True,
-        selection_mode="multi-row",
-        on_select="rerun",
-    )
-
-    sel_rows = event.selection.rows if event.selection else []
+    sel_rows, _ = tabela_marcavel(df_show, key=tab_key)
 
     col_info, col_soma, col_export = st.columns([2, 2, 1])
 

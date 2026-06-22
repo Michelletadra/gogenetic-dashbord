@@ -318,6 +318,42 @@ def kpi_card(col, icon: str, label: str, value: str, sub: str = "", border: str 
     </div>""", unsafe_allow_html=True)
 
 
+def tabela_marcavel(df, key: str, height: int = None, column_config: dict = None):
+    """Renderiza um dataframe com suporte a marca-texto (sessão apenas)."""
+    import pandas as pd
+
+    state_key = f"marcados_{key}"
+    if state_key not in st.session_state:
+        st.session_state[state_key] = set()
+
+    marcados = st.session_state[state_key]
+
+    def _estilo(row):
+        return ["background-color: #FFF176; color: #1A1033"] * len(row) if row.name in marcados else [""] * len(row)
+
+    df_render = df.reset_index(drop=True)
+    styled = df_render.style.apply(_estilo, axis=1)
+
+    kwargs = dict(use_container_width=True, hide_index=True, selection_mode="multi-row", on_select="rerun", key=f"tbl_{key}")
+    if height:
+        kwargs["height"] = height
+    if column_config:
+        kwargs["column_config"] = column_config
+
+    event = st.dataframe(styled, **kwargs)
+    sel_rows = event.selection.rows if event.selection else []
+
+    ca, cb, _ = st.columns([1, 1, 4])
+    if ca.button("🖊️ Marcar", key=f"marcar_{key}", disabled=not sel_rows):
+        st.session_state[state_key] = marcados.symmetric_difference(sel_rows)
+        st.rerun()
+    if cb.button("🧹 Limpar marcas", key=f"limpar_{key}", disabled=not marcados):
+        st.session_state[state_key] = set()
+        st.rerun()
+
+    return sel_rows, list(marcados)
+
+
 def sidebar_header(logo_path: Optional[str] = None):
     require_auth()
     with st.sidebar:

@@ -13,7 +13,8 @@ import streamlit as st
 from utils import (GLOBAL_CSS, BRAND, brl, soma, kpi_card, plotly_layout,
                    sidebar_header, get_empresas_disponiveis,
                    load_data_unificado, load_vencidas_unificado,
-                   load_companies_data, load_companies_vencidas)
+                   load_companies_data, load_companies_vencidas,
+                   tabela_marcavel)
 
 CONTRATOS_XLS  = Path(__file__).parent.parent / "data" / "contratos.xlsx"
 CONTRATOS_JSON = Path(__file__).parent.parent / "data" / "contratos_manual.json"
@@ -350,11 +351,7 @@ def tabela_fluxo(items: list, cols_map: dict, key: str):
 
     df_show["Valor"] = df_num["valor"].apply(brl)
 
-    event = st.dataframe(
-        df_show, use_container_width=True, hide_index=True,
-        selection_mode="multi-row", on_select="rerun", key=f"tbl_{key}",
-    )
-    sel = event.selection.rows if event.selection else []
+    sel, _ = tabela_marcavel(df_show, key=key)
 
     col_i, col_s, col_e = st.columns([2, 2, 1])
     with col_i:
