@@ -72,7 +72,7 @@ with st.sidebar:
 
     st.markdown("---")
     if st.button("🔄 Atualizar dados", use_container_width=True):
-        st.cache_data.clear()
+        load_servicos.clear()
         st.rerun()
     st.caption("⏱ Cache: 5 min")
 
@@ -232,9 +232,9 @@ else:
                        else df_base["situacaoOS"] == status]
         return df_f.sort_values("dtVenda_sort", ascending=asc)
 
-    df_exec      = _filtro(["Em execução", "Invoice"], asc=True)
+    df_exec      = _filtro("Em execução",              asc=True)
     df_aprov     = _filtro("Aprovado",                 asc=False)
-    df_faturar   = _filtro(["Faturar", "Invoice"],     asc=False)
+    df_faturar   = _filtro("Faturar",                  asc=False)
     df_invoice   = _filtro("Invoice",                  asc=False)
     df_credito   = _filtro("Consumo de crédito",       asc=False)
     df_espera    = _filtro("Em espera",                asc=False)
@@ -305,16 +305,12 @@ else:
             )
 
     with tab_exec:
-        if not df_invoice.empty:
-            st.caption(f"⚠️ Inclui {len(df_invoice)} serviço(s) com situação **Invoice**")
         tabela_servico(df_exec, "execucao")
 
     with tab_aprov:
         tabela_servico(df_aprov, "aprovados")
 
     with tab_fat:
-        if not df_invoice.empty:
-            st.caption(f"⚠️ Inclui {len(df_invoice)} serviço(s) com situação **Invoice**")
         tabela_servico(df_faturar, "faturar")
 
     with tab_inv:

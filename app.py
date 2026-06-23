@@ -57,13 +57,11 @@ with st.sidebar:
     if bling_auth.is_connected():
         st.success("✅ Conectada")
         if st.button("🔌 Desconectar", use_container_width=True):
-            if bling_auth.TOKEN_FILE.exists():
-                bling_auth.TOKEN_FILE.unlink()
+            bling_auth.disconnect()
             st.rerun()
     else:
         st.warning("⚠️ Não conectada")
-        auth_url = bling_auth.get_auth_url()
-        st.link_button("🔗 Conectar ao Bling", auth_url, use_container_width=True)
+        st.link_button("🔗 Conectar ao Bling", bling_auth.get_auth_url(), use_container_width=True)
     st.markdown("---")
     st.caption("Navegue pelas páginas no menu acima ↑")
 
