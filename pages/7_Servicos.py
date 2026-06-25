@@ -248,7 +248,8 @@ else:
                     return part.upper()
         return "—"
 
-    df_base["Cód. S"] = df_base.get("tags", pd.Series(dtype=object)).apply(_cod_s)
+    tags_col = df_base["tags"] if "tags" in df_base.columns else pd.Series([None] * len(df_base))
+    df_base["Cód. S"] = tags_col.apply(_cod_s)
 
     def _filtro(status, asc=False):
         df_f = df_base[df_base["situacaoOS"].isin(status) if isinstance(status, list)
