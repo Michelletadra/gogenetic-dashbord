@@ -234,22 +234,25 @@ else:
 
     # Código S das palavras-chave (ex: S6944)
     def _cod_s(tags):
-        if not tags:
-            return "—"
-        if isinstance(tags, list):
-            for t in tags:
-                nome = (t.get("nome") or t.get("tag") or str(t)).strip()
-                if nome.upper().startswith("S") and nome[1:].isdigit():
+        try:
+            if not tags:
+                return "—"
+            items = tags if isinstance(tags, list) else str(tags).split(",")
+            for t in items:
+                if isinstance(t, dict):
+                    nome = str(t.get("nome") or t.get("tag") or "").strip()
+                else:
+                    nome = str(t).strip()
+                if len(nome) > 1 and nome[0].upper() == "S" and nome[1:].isdigit():
                     return nome.upper()
-        if isinstance(tags, str):
-            for part in tags.split(","):
-                part = part.strip()
-                if part.upper().startswith("S") and part[1:].isdigit():
-                    return part.upper()
+        except Exception:
+            pass
         return "—"
 
-    tags_col = df_base["tags"] if "tags" in df_base.columns else pd.Series([None] * len(df_base))
-    df_base["Cód. S"] = tags_col.apply(_cod_s)
+    if "tags" in df_base.columns:
+        df_base["Cód. S"] = df_base["tags"].apply(_cod_s)
+    else:
+        df_base["Cód. S"] = "—"
 
     def _filtro(status, asc=False):
         df_f = df_base[df_base["situacaoOS"].isin(status) if isinstance(status, list)
