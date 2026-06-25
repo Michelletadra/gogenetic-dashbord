@@ -408,4 +408,60 @@ else:
         tabela_servico(df_espera, "espera")
 
     with tab_conc:
-        tabela_servico(df_concluido, "concluidos")
+        cols_conc = {
+            "codigo":            "Cód.",
+            "dtVenda":           "Data",
+            "Dias em execução":  "Dias",
+            "Cód. S":            "Cód. S",
+            "nomeContato":       "Cliente",
+            "nomeVendedor":      "Vendedor",
+            "situacaoOS":        "Situação OS",
+            "valorTotal":        "Valor",
+        }
+        if not df_concluido.empty:
+            existing = [c for c in cols_conc if c in df_concluido.columns]
+            df_render_conc = df_concluido[existing].rename(columns=cols_conc).copy()
+            df_render_conc["Valor"] = df_render_conc["Valor"].apply(brl)
+            sel_rows, _ = tabela_marcavel(
+                df_render_conc,
+                key="concluidos",
+                column_config={
+                    "Dias":        st.column_config.NumberColumn("Dias", width="small"),
+                    "Cód. S":      st.column_config.TextColumn("Cód. S", width="small"),
+                    "Situação OS": st.column_config.TextColumn("Situação OS", width="medium"),
+                    "Cliente":     st.column_config.TextColumn("Cliente", width="large"),
+                    "Valor":       st.column_config.TextColumn("Valor", width="small"),
+                },
+            )
+            col_info, col_soma, col_export = st.columns([2, 2, 1])
+            with col_info:
+                if sel_rows:
+                    st.caption(f"✅ {len(sel_rows)} selecionado(s) de {len(df_concluido)}")
+                else:
+                    st.caption(f"Total: {len(df_concluido)} serviços · clique para selecionar")
+            with col_soma:
+                val = df_concluido.iloc[sel_rows]["valorTotal"].sum() if sel_rows else df_concluido["valorTotal"].sum()
+                label = "Soma selecionados" if sel_rows else "Total filtrado"
+                borda = "#7E16B8" if sel_rows else "rgba(126,22,184,0.2)"
+                st.markdown(
+                    f"<div style='background:#F5F0FA;border:1px solid {borda};border-radius:8px;"
+                    f"padding:8px 16px;text-align:right'>"
+                    f"<span style='font-size:.72rem;color:#8B6BAE;text-transform:uppercase;letter-spacing:1px'>{label}</span><br>"
+                    f"<span style='font-size:1.3rem;font-weight:700;color:#1A1033'>{brl(val)}</span>"
+                    f"</div>", unsafe_allow_html=True,
+                )
+            with col_export:
+                buf = io.BytesIO()
+                with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+                    (df_render_conc.iloc[sel_rows] if sel_rows else df_render_conc).to_excel(
+                        writer, index=False, sheet_name="Serviços")
+                st.download_button(
+                    label="📥 Excel" + (f" ({len(sel_rows)} sel.)" if sel_rows else ""),
+                    data=buf.getvalue(),
+                    file_name=f"servicos_concluidos_{date.today().strftime('%Y%m%d')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                    key="dl_concluidos",
+                )
+        else:
+            st.info("Nenhum registro nesta categoria.")
