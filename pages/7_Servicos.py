@@ -227,6 +227,29 @@ else:
     ).dt.days.fillna(0).astype(int)
     df_base["dtVenda"] = df_base["dtVenda_sort"].dt.strftime("%d/%m/%Y")
 
+    # Data de entrega
+    df_base["Entrega"] = pd.to_datetime(
+        df_base.get("dtEntrega", pd.Series(dtype=str)), errors="coerce"
+    ).dt.strftime("%d/%m/%Y").fillna("—")
+
+    # Código S das palavras-chave (ex: S6944)
+    def _cod_s(tags):
+        if not tags:
+            return "—"
+        if isinstance(tags, list):
+            for t in tags:
+                nome = (t.get("nome") or t.get("tag") or str(t)).strip()
+                if nome.upper().startswith("S") and nome[1:].isdigit():
+                    return nome.upper()
+        if isinstance(tags, str):
+            for part in tags.split(","):
+                part = part.strip()
+                if part.upper().startswith("S") and part[1:].isdigit():
+                    return part.upper()
+        return "—"
+
+    df_base["Cód. S"] = df_base.get("tags", pd.Series(dtype=object)).apply(_cod_s)
+
     def _filtro(status, asc=False):
         df_f = df_base[df_base["situacaoOS"].isin(status) if isinstance(status, list)
                        else df_base["situacaoOS"] == status]
@@ -305,7 +328,65 @@ else:
             )
 
     with tab_exec:
-        tabela_servico(df_exec, "execucao")
+        cols_exec = {
+            "codigo":            "Cód.",
+            "dtVenda":           "Data",
+            "Dias em execução":  "Dias",
+            "Entrega":           "Entrega",
+            "Cód. S":            "Cód. S",
+            "nomeContato":       "Cliente",
+            "nomeVendedor":      "Vendedor",
+            "situacaoOS":        "Situação OS",
+            "valorTotal":        "Valor",
+        }
+        if not df_exec.empty:
+            existing = [c for c in cols_exec if c in df_exec.columns]
+            df_render_exec = df_exec[existing].rename(columns=cols_exec).copy()
+            df_render_exec["Valor"] = df_render_exec["Valor"].apply(brl)
+            sel_rows, _ = tabela_marcavel(
+                df_render_exec,
+                key="execucao",
+                column_config={
+                    "Dias":        st.column_config.NumberColumn("Dias", width="small"),
+                    "Entrega":     st.column_config.TextColumn("Entrega", width="small"),
+                    "Cód. S":      st.column_config.TextColumn("Cód. S", width="small"),
+                    "Situação OS": st.column_config.TextColumn("Situação OS", width="medium"),
+                    "Cliente":     st.column_config.TextColumn("Cliente", width="large"),
+                    "Valor":       st.column_config.TextColumn("Valor", width="small"),
+                },
+            )
+            col_info, col_soma, col_export = st.columns([2, 2, 1])
+            with col_info:
+                if sel_rows:
+                    st.caption(f"✅ {len(sel_rows)} selecionado(s) de {len(df_exec)}")
+                else:
+                    st.caption(f"Total: {len(df_exec)} serviços · clique para selecionar")
+            with col_soma:
+                val = df_exec.iloc[sel_rows]["valorTotal"].sum() if sel_rows else df_exec["valorTotal"].sum()
+                label = "Soma selecionados" if sel_rows else "Total filtrado"
+                borda = "#7E16B8" if sel_rows else "rgba(126,22,184,0.2)"
+                st.markdown(
+                    f"<div style='background:#F5F0FA;border:1px solid {borda};border-radius:8px;"
+                    f"padding:8px 16px;text-align:right'>"
+                    f"<span style='font-size:.72rem;color:#8B6BAE;text-transform:uppercase;letter-spacing:1px'>{label}</span><br>"
+                    f"<span style='font-size:1.3rem;font-weight:700;color:#1A1033'>{brl(val)}</span>"
+                    f"</div>", unsafe_allow_html=True,
+                )
+            with col_export:
+                buf = io.BytesIO()
+                with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+                    (df_render_exec.iloc[sel_rows] if sel_rows else df_render_exec).to_excel(
+                        writer, index=False, sheet_name="Serviços")
+                st.download_button(
+                    label="📥 Excel" + (f" ({len(sel_rows)} sel.)" if sel_rows else ""),
+                    data=buf.getvalue(),
+                    file_name=f"servicos_execucao_{date.today().strftime('%Y%m%d')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                    key="dl_execucao",
+                )
+        else:
+            st.info("Nenhum registro nesta categoria.")
 
     with tab_aprov:
         tabela_servico(df_aprov, "aprovados")
