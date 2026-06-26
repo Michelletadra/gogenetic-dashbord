@@ -268,6 +268,10 @@ else:
 st.markdown("<div class='section-title'>NF Emitidas — Serviços</div>", unsafe_allow_html=True)
 if _nf_emitidas:
     df_nf = pd.DataFrame(_nf_emitidas)
+    if "tags" in df_nf.columns:
+        st.caption(f"DEBUG tags: {df_nf['tags'].head(3).tolist()}")
+    else:
+        st.caption(f"DEBUG: sem coluna tags. Colunas: {list(df_nf.columns)}")
     df_nf["Cód. S"] = df_nf["tags"].apply(_cod_s) if "tags" in df_nf.columns else "—"
     df_nf["valorTotal"] = pd.to_numeric(df_nf.get("valorTotal", 0), errors="coerce").fillna(0)
     cols_nf = [c for c in ["empresa","dtVenda","nomeVendedor","nomeContato","Cód. S","valorTotal"] if c in df_nf.columns]
