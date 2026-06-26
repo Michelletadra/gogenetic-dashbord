@@ -252,16 +252,8 @@ def _cod_s(tags):
 # ── Tabela detalhe ─────────────────────────────────────────────────────────────
 st.markdown("<div class='section-title'>Detalhe das Vendas</div>", unsafe_allow_html=True)
 
-# Monta linhas de vendas normais (sem Cód. S)
-rows_vendas = [{**v, "Cód. S": "—"} for v in vendas]
-
-# Monta linhas de NF Emitidas (serviços tipo=10 com Cód. S)
-rows_nf = []
-for s in _nf_emitidas:
-    tags = s.get("tags")
-    rows_nf.append({**s, "Cód. S": _cod_s(tags)})
-
-todos = rows_vendas + rows_nf
+rows_vendas = [{**v, "Cód. S": _cod_s(v.get("tags"))} for v in vendas]
+todos = rows_vendas
 
 if todos:
     df_det = pd.DataFrame(todos)
