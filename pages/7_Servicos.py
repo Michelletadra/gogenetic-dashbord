@@ -23,7 +23,7 @@ COR_STATUS = {
     "NF Emitida":         "#6B7280",
 }
 
-STATUS_ATIVOS = ["Em execução", "Aprovado", "Faturar", "Invoice", "Em espera", "Consumo de crédito"]
+STATUS_ATIVOS = ["Em execução", "Aprovado", "Faturar", "Invoice", "Em espera", "Consumo de crédito", "NF Emitida"]
 STATUS_TODOS  = list(COR_STATUS.keys())
 
 # ── Sidebar ────────────────────────────────────────────────────────────────────
