@@ -51,6 +51,7 @@ with st.sidebar:
 
 # ── Carrega dados (empresas em paralelo) ───────────────────────────────────────
 with st.spinner("Carregando vendas..."):
+    from utils import get_clients
     ano_atual   = date.today().year
     _period_map = load_companies_data(empresas_ativas, dt_ini, dt_fim)
     _ano_map    = load_companies_vendas_ano(empresas_ativas, ano_atual)
@@ -61,6 +62,19 @@ with st.spinner("Carregando vendas..."):
             vendas.append({**item, "empresa": nome})
         for item in _ano_map[nome]:
             vendas_12m.append({**item, "empresa": nome})
+
+    # Busca serviços NF Emitida (tipo=10) para obter Cód. S
+    _nf_emitidas = []
+    try:
+        clients = get_clients()
+        for nome in empresas_ativas:
+            if nome in clients:
+                servicos = clients[nome].get_servicos(dt_ini.strftime("%Y-%m-%d"), dt_fim.strftime("%Y-%m-%d"))
+                for s in servicos:
+                    if (s.get("situacaoOS") or "").strip() == "NF Emitida":
+                        _nf_emitidas.append({**s, "empresa": nome})
+    except Exception:
+        pass
 
 total_vendas = soma(vendas, "valorTotal")
 ticket_medio = total_vendas / len(vendas) if vendas else 0
@@ -221,36 +235,25 @@ if vendas:
         st.dataframe(df_rv[["Vendedor","Total","Qtd Vendas","Ticket Médio","Part. %"]],
                      use_container_width=True, hide_index=True)
 
+def _cod_s(tags):
+    try:
+        if not tags:
+            return "—"
+        items = tags if isinstance(tags, list) else str(tags).split(",")
+        for t in items:
+            nome = str(t.get("nome") or t.get("tag") or "") if isinstance(t, dict) else str(t)
+            nome = nome.strip()
+            if len(nome) > 1 and nome[0].upper() == "S" and nome[1:].isdigit():
+                return nome.upper()
+    except Exception:
+        pass
+    return "—"
+
 # ── Tabela detalhe ─────────────────────────────────────────────────────────────
 st.markdown("<div class='section-title'>Detalhe das Vendas</div>", unsafe_allow_html=True)
 if vendas:
     df_det = pd.DataFrame(vendas)
-
-    # debug temporário — remover depois
-    if "tags" in df_det.columns:
-        st.caption(f"DEBUG tags sample: {df_det['tags'].dropna().head(3).tolist()}")
-    else:
-        st.caption("DEBUG: coluna 'tags' não existe no DataFrame")
-
-    def _cod_s(tags):
-        try:
-            if not tags:
-                return "—"
-            items = tags if isinstance(tags, list) else str(tags).split(",")
-            for t in items:
-                nome = str(t.get("nome") or t.get("tag") or "") if isinstance(t, dict) else str(t)
-                nome = nome.strip()
-                if len(nome) > 1 and nome[0].upper() == "S" and nome[1:].isdigit():
-                    return nome.upper()
-        except Exception:
-            pass
-        return "—"
-
-    if "tags" in df_det.columns:
-        df_det["Cód. S"] = df_det["tags"].apply(_cod_s)
-    else:
-        df_det["Cód. S"] = "—"
-
+    df_det["Cód. S"] = "—"
     cols = [c for c in ["empresa","dtVenda","nomeVendedor","nomeContato","Cód. S","valorTotal"] if c in df_det.columns]
     df_det = df_det[cols].rename(columns={
         "empresa":"Empresa","dtVenda":"Data","nomeVendedor":"Vendedor",
@@ -260,3 +263,18 @@ if vendas:
     st.dataframe(df_det, use_container_width=True, hide_index=True)
 else:
     st.info("Nenhuma venda no período.")
+
+# ── NF Emitidas (serviços tipo=10 com Cód. S) ──────────────────────────────────
+st.markdown("<div class='section-title'>NF Emitidas — Serviços</div>", unsafe_allow_html=True)
+if _nf_emitidas:
+    df_nf = pd.DataFrame(_nf_emitidas)
+    df_nf["Cód. S"] = df_nf["tags"].apply(_cod_s) if "tags" in df_nf.columns else "—"
+    df_nf["valorTotal"] = pd.to_numeric(df_nf.get("valorTotal", 0), errors="coerce").fillna(0)
+    cols_nf = [c for c in ["empresa","dtVenda","nomeVendedor","nomeContato","Cód. S","valorTotal"] if c in df_nf.columns]
+    df_nf = df_nf[cols_nf].rename(columns={
+        "empresa":"Empresa","dtVenda":"Data","nomeVendedor":"Vendedor",
+        "nomeContato":"Cliente","valorTotal":"Valor"})
+    df_nf["Valor"] = df_nf["Valor"].apply(brl)
+    st.dataframe(df_nf, use_container_width=True, hide_index=True)
+else:
+    st.info("Nenhuma NF Emitida no período.")
