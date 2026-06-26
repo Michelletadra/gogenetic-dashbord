@@ -226,6 +226,12 @@ st.markdown("<div class='section-title'>Detalhe das Vendas</div>", unsafe_allow_
 if vendas:
     df_det = pd.DataFrame(vendas)
 
+    # debug temporário — remover depois
+    if "tags" in df_det.columns:
+        st.caption(f"DEBUG tags sample: {df_det['tags'].dropna().head(3).tolist()}")
+    else:
+        st.caption("DEBUG: coluna 'tags' não existe no DataFrame")
+
     def _cod_s(tags):
         try:
             if not tags:
