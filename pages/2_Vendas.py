@@ -251,34 +251,26 @@ def _cod_s(tags):
 
 # ── Tabela detalhe ─────────────────────────────────────────────────────────────
 st.markdown("<div class='section-title'>Detalhe das Vendas</div>", unsafe_allow_html=True)
-if vendas:
-    df_det = pd.DataFrame(vendas)
-    df_det["Cód. S"] = "—"
+
+# Monta linhas de vendas normais (sem Cód. S)
+rows_vendas = [{**v, "Cód. S": "—"} for v in vendas]
+
+# Monta linhas de NF Emitidas (serviços tipo=10 com Cód. S)
+rows_nf = []
+for s in _nf_emitidas:
+    tags = s.get("tags")
+    rows_nf.append({**s, "Cód. S": _cod_s(tags)})
+
+todos = rows_vendas + rows_nf
+
+if todos:
+    df_det = pd.DataFrame(todos)
+    df_det["valorTotal"] = pd.to_numeric(df_det.get("valorTotal", 0), errors="coerce").fillna(0)
     cols = [c for c in ["empresa","dtVenda","nomeVendedor","nomeContato","Cód. S","valorTotal"] if c in df_det.columns]
     df_det = df_det[cols].rename(columns={
         "empresa":"Empresa","dtVenda":"Data","nomeVendedor":"Vendedor",
         "nomeContato":"Cliente","valorTotal":"Valor"})
-    if "Valor" in df_det.columns:
-        df_det["Valor"] = df_det["Valor"].apply(brl)
+    df_det["Valor"] = df_det["Valor"].apply(brl)
     st.dataframe(df_det, use_container_width=True, hide_index=True)
 else:
     st.info("Nenhuma venda no período.")
-
-# ── NF Emitidas (serviços tipo=10 com Cód. S) ──────────────────────────────────
-st.markdown("<div class='section-title'>NF Emitidas — Serviços</div>", unsafe_allow_html=True)
-if _nf_emitidas:
-    df_nf = pd.DataFrame(_nf_emitidas)
-    if "tags" in df_nf.columns:
-        st.caption(f"DEBUG tags: {df_nf['tags'].head(3).tolist()}")
-    else:
-        st.caption(f"DEBUG: sem coluna tags. Colunas: {list(df_nf.columns)}")
-    df_nf["Cód. S"] = df_nf["tags"].apply(_cod_s) if "tags" in df_nf.columns else "—"
-    df_nf["valorTotal"] = pd.to_numeric(df_nf.get("valorTotal", 0), errors="coerce").fillna(0)
-    cols_nf = [c for c in ["empresa","dtVenda","nomeVendedor","nomeContato","Cód. S","valorTotal"] if c in df_nf.columns]
-    df_nf = df_nf[cols_nf].rename(columns={
-        "empresa":"Empresa","dtVenda":"Data","nomeVendedor":"Vendedor",
-        "nomeContato":"Cliente","valorTotal":"Valor"})
-    df_nf["Valor"] = df_nf["Valor"].apply(brl)
-    st.dataframe(df_nf, use_container_width=True, hide_index=True)
-else:
-    st.info("Nenhuma NF Emitida no período.")
