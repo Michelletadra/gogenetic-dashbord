@@ -225,7 +225,27 @@ if vendas:
 st.markdown("<div class='section-title'>Detalhe das Vendas</div>", unsafe_allow_html=True)
 if vendas:
     df_det = pd.DataFrame(vendas)
-    cols   = [c for c in ["empresa","dtVenda","nomeVendedor","nomeContato","valorTotal"] if c in df_det.columns]
+
+    def _cod_s(tags):
+        try:
+            if not tags:
+                return "—"
+            items = tags if isinstance(tags, list) else str(tags).split(",")
+            for t in items:
+                nome = str(t.get("nome") or t.get("tag") or "") if isinstance(t, dict) else str(t)
+                nome = nome.strip()
+                if len(nome) > 1 and nome[0].upper() == "S" and nome[1:].isdigit():
+                    return nome.upper()
+        except Exception:
+            pass
+        return "—"
+
+    if "tags" in df_det.columns:
+        df_det["Cód. S"] = df_det["tags"].apply(_cod_s)
+    else:
+        df_det["Cód. S"] = "—"
+
+    cols = [c for c in ["empresa","dtVenda","nomeVendedor","nomeContato","Cód. S","valorTotal"] if c in df_det.columns]
     df_det = df_det[cols].rename(columns={
         "empresa":"Empresa","dtVenda":"Data","nomeVendedor":"Vendedor",
         "nomeContato":"Cliente","valorTotal":"Valor"})

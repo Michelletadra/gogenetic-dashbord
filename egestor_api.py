@@ -82,7 +82,7 @@ class EgestorClient:
             "dtTipo": "dtVenda",
             "dtIni": dt_ini,
             "dtFim": dt_fim,
-            "fields": "codigo,dtVenda,valorTotal,valorFinanc,nomeContato,codVendedor,nomeVendedor,situacao",
+            "fields": "codigo,dtVenda,valorTotal,valorFinanc,nomeContato,codVendedor,nomeVendedor,situacao,tags",
             "orderBy": "nomeVendedor,asc",
         })
 
