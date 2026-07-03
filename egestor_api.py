@@ -44,18 +44,24 @@ class EgestorClient:
                     time.sleep(wait)
             self._request_times.append(time.time())
 
-    def _get(self, endpoint: str, params: Optional[dict] = None) -> dict:
+    def _get(self, endpoint: str, params: Optional[dict] = None, _retries: int = 3) -> dict:
         self._rate_limit()
         token = self._get_access_token()
-        resp = requests.get(
-            f"{API_URL}/{endpoint}",
-            headers={"Authorization": f"Bearer {token}"},
-            params=params,
-            timeout=20,
-        )
+        try:
+            resp = requests.get(
+                f"{API_URL}/{endpoint}",
+                headers={"Authorization": f"Bearer {token}"},
+                params=params,
+                timeout=30,
+            )
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
+            if _retries <= 0:
+                raise
+            time.sleep(3)
+            return self._get(endpoint, params, _retries=_retries - 1)
         if resp.status_code == 429:
             time.sleep(65)
-            return self._get(endpoint, params)
+            return self._get(endpoint, params, _retries=_retries)
         resp.raise_for_status()
         return resp.json()
 

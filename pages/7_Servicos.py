@@ -277,7 +277,14 @@ else:
         f"📁 Concluídos / Outros ({len(df_concluido)})",
     ])
 
-    def tabela_servico(df_t: pd.DataFrame, key_suffix: str):
+    def _tag_urgencia(dias: int) -> str:
+        if dias <= 7:
+            return f"🟢 {dias}d"
+        if dias <= 15:
+            return f"🟡 {dias}d"
+        return f"🔴 {dias}d"
+
+    def tabela_servico(df_t: pd.DataFrame, key_suffix: str, mostrar_urgencia: bool = False):
         if df_t.empty:
             st.info("Nenhum registro nesta categoria.")
             return
@@ -285,15 +292,25 @@ else:
         df_render = df_t[existing].rename(columns=cols_map).copy()
         df_render["Valor"] = df_render["Valor"].apply(brl)
 
+        col_cfg = {
+            "Dias":        st.column_config.NumberColumn("Dias", help="Dias desde a abertura do serviço", width="small"),
+            "Situação OS": st.column_config.TextColumn("Situação OS", width="medium"),
+            "Cliente":     st.column_config.TextColumn("Cliente",     width="large"),
+            "Valor":       st.column_config.TextColumn("Valor",       width="small"),
+        }
+
+        if mostrar_urgencia and "Dias" in df_render.columns:
+            pos = df_render.columns.get_loc("Dias") + 1
+            df_render.insert(pos, "Em Faturar", df_render["Dias"].apply(_tag_urgencia))
+            col_cfg["Em Faturar"] = st.column_config.TextColumn(
+                "Em Faturar", help="Tempo parado em Faturar: 🟢 até 7 dias · 🟡 8-15 dias · 🔴 mais de 15 dias",
+                width="small",
+            )
+
         sel_rows, _ = tabela_marcavel(
             df_render,
             key=key_suffix,
-            column_config={
-                "Dias":        st.column_config.NumberColumn("Dias", help="Dias desde a abertura do serviço", width="small"),
-                "Situação OS": st.column_config.TextColumn("Situação OS", width="medium"),
-                "Cliente":     st.column_config.TextColumn("Cliente",     width="large"),
-                "Valor":       st.column_config.TextColumn("Valor",       width="small"),
-            },
+            column_config=col_cfg,
         )
 
         col_info, col_soma, col_export = st.columns([2, 2, 1])
@@ -396,7 +413,7 @@ else:
         tabela_servico(df_aprov, "aprovados")
 
     with tab_fat:
-        tabela_servico(df_faturar, "faturar")
+        tabela_servico(df_faturar, "faturar", mostrar_urgencia=True)
 
     with tab_inv:
         tabela_servico(df_invoice, "invoice")

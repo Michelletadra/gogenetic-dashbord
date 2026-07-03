@@ -15,6 +15,20 @@ st.set_page_config(
 )
 st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
 
+# ── OAuth2 Bling — captura o código de retorno ─────────────────────────────────
+# Roda ANTES do login: o fluxo no Bling pode derrubar a sessão e forçar novo
+# login, o que faria o código nunca ser processado se isso viesse depois.
+params = st.query_params
+if "code" in params and params.get("state") == "bling_dashboard":
+    with st.spinner("Conectando ao Bling..."):
+        try:
+            bling_auth.exchange_code(params["code"])
+            st.query_params.clear()
+            st.success("✅ GoGenetic You conectada com sucesso!")
+        except Exception as e:
+            st.query_params.clear()
+            st.error(f"Erro ao conectar ao Bling: {e}")
+
 # ── Autenticação ───────────────────────────────────────────────────────────────
 authenticator = get_authenticator()
 authenticator.login(location="main")
@@ -30,18 +44,6 @@ elif st.session_state.get("authentication_status") is None:
     </div>
     """, unsafe_allow_html=True)
     st.stop()
-
-# ── OAuth2 Bling — captura o código de retorno ─────────────────────────────────
-params = st.query_params
-if "code" in params and params.get("state") == "bling_dashboard":
-    with st.spinner("Conectando ao Bling..."):
-        try:
-            bling_auth.exchange_code(params["code"])
-            st.query_params.clear()
-            st.success("✅ GoGenetic You conectada com sucesso!")
-            st.rerun()
-        except Exception as e:
-            st.error(f"Erro ao conectar ao Bling: {e}")
 
 # ── Sidebar ────────────────────────────────────────────────────────────────────
 sidebar_header()

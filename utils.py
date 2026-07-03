@@ -503,7 +503,7 @@ def get_bling_client():
     try:
         import bling_auth
         import bling_api
-        token = bling_auth.get_valid_token()
+        token = bling_auth.get_token()
         if token:
             holder["client"] = bling_api.BlingClient(token, NOME_YOU)
             return holder["client"]

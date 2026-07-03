@@ -64,7 +64,8 @@ def exchange_code(code: str):
         data={"grant_type": "authorization_code", "code": code, "redirect_uri": redirect},
         timeout=15,
     )
-    resp.raise_for_status()
+    if resp.status_code != 200:
+        raise RuntimeError(f"{resp.status_code} — {resp.text}")
     _save(resp.json())
 
 
