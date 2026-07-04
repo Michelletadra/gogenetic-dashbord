@@ -101,18 +101,28 @@ def get_token() -> Optional[str]:
 
 
 def is_connected() -> bool:
+    return connection_error() is None
+
+
+def connection_error() -> Optional[str]:
+    """Retorna None se conectado, ou uma string com o motivo da falha."""
+    tokens = _load()
+    if not tokens or not tokens.get("access_token"):
+        return "Nenhum token salvo — clique em Conectar ao Bling."
     token = get_token()
     if not token:
-        return False
+        return "Token expirado e o refresh falhou — reconecte."
     try:
         r = requests.get(
             "https://api.bling.com.br/Api/v3/empresas",
             headers={"Authorization": f"Bearer {token}"},
-            timeout=5,
+            timeout=15,
         )
-        return r.status_code == 200
-    except Exception:
-        return False
+        if r.status_code == 200:
+            return None
+        return f"API do Bling respondeu {r.status_code}: {r.text[:200]}"
+    except Exception as e:
+        return f"Erro ao chamar API do Bling: {e}"
 
 
 def disconnect():

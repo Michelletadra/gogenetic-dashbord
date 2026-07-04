@@ -56,13 +56,15 @@ with st.sidebar:
 
     # Status Bling / GoGenetic You
     st.markdown("**🧬 GoGenetic You (Bling)**")
-    if bling_auth.is_connected():
+    _bling_erro = bling_auth.connection_error()
+    if _bling_erro is None:
         st.success("✅ Conectada")
         if st.button("🔌 Desconectar", use_container_width=True):
             bling_auth.disconnect()
             st.rerun()
     else:
         st.warning("⚠️ Não conectada")
+        st.caption(f"Motivo: {_bling_erro}")
         st.link_button("🔗 Conectar ao Bling", bling_auth.get_auth_url(), use_container_width=True)
     st.markdown("---")
     st.caption("Navegue pelas páginas no menu acima ↑")
