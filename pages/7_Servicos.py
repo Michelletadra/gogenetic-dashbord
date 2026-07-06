@@ -6,6 +6,7 @@ import plotly.express as px
 from datetime import date, timedelta
 from utils import (GLOBAL_CSS, BRAND, brl, soma, kpi_card, plotly_layout,
                    sidebar_header, get_clients, tabela_marcavel)
+import db_faturar_tracking
 
 st.set_page_config(page_title="Serviços | GoGenetic", page_icon="🔬", layout="wide")
 st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
@@ -267,6 +268,23 @@ else:
     df_espera    = _filtro("Em espera",                asc=False)
     df_concluido = _filtro(["NF Emitida", "Cotação", "Proposta"], asc=False)
 
+    # ── Substitui Data/Dias de "A Faturar" pela data real de entrada nessa
+    # situação (a API do eGestor só guarda a data de criação do orçamento) ──────
+    if not df_faturar.empty:
+        try:
+            faturar_atual   = {s["codigo"]: s.get("nomeContato", "") for s in todos if _sit(s) == "Faturar"}
+            fora_de_faturar = {s["codigo"] for s in todos if _sit(s) != "Faturar"}
+            datas_entrada   = db_faturar_tracking.sync(faturar_atual, fora_de_faturar)
+            df_faturar = df_faturar.copy()
+            df_faturar["dtVenda_sort"] = pd.to_datetime(df_faturar["codigo"].map(datas_entrada))
+            df_faturar["dtVenda"] = df_faturar["dtVenda_sort"].dt.strftime("%d/%m/%Y")
+            df_faturar["Dias em execução"] = (
+                pd.Timestamp.today().normalize() - df_faturar["dtVenda_sort"]
+            ).dt.days.fillna(0).astype(int)
+            df_faturar = df_faturar.sort_values("dtVenda_sort", ascending=False)
+        except Exception as _exc:
+            st.warning(f"Não foi possível sincronizar datas de entrada em Faturar: {_exc}")
+
     tab_exec, tab_aprov, tab_fat, tab_inv, tab_cred, tab_esp, tab_conc = st.tabs([
         f"⚡ Em Execução ({len(df_exec)})",
         f"✅ Aprovados ({len(df_aprov)})",
@@ -292,8 +310,10 @@ else:
         df_render = df_t[existing].rename(columns=cols_map).copy()
         df_render["Valor"] = df_render["Valor"].apply(brl)
 
+        dias_help = "Dias em Faturar (desde que entrou nessa situação)" if mostrar_urgencia \
+            else "Dias desde a abertura do serviço"
         col_cfg = {
-            "Dias":        st.column_config.NumberColumn("Dias", help="Dias desde a abertura do serviço", width="small"),
+            "Dias":        st.column_config.NumberColumn("Dias", help=dias_help, width="small"),
             "Situação OS": st.column_config.TextColumn("Situação OS", width="medium"),
             "Cliente":     st.column_config.TextColumn("Cliente",     width="large"),
             "Valor":       st.column_config.TextColumn("Valor",       width="small"),
