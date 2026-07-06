@@ -1,5 +1,6 @@
-"""OAuth2 Bling API v3 — autenticação simples via arquivo."""
-import base64, json, os
+"""OAuth2 Bling API v3 — tokens persistidos no Supabase (o disco do Streamlit
+Cloud é apagado a cada reboot/redeploy, então um arquivo local não sobrevive)."""
+import base64, json, os, time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
@@ -9,7 +10,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-TOKEN_FILE = Path(__file__).parent / "bling_tokens.json"
+TOKEN_FILE = Path(__file__).parent / "bling_tokens.json"  # cache local best-effort
 TOKEN_URL  = "https://www.bling.com.br/Api/v3/oauth/token"
 AUTH_URL   = "https://www.bling.com.br/Api/v3/oauth/authorize"
 
@@ -39,14 +40,52 @@ def get_auth_url() -> str:
     )
 
 
+_SB_CLIENT = None
+
+
+def _sb():
+    global _SB_CLIENT
+    if _SB_CLIENT is None:
+        from supabase import create_client
+        _SB_CLIENT = create_client(_env("SUPABASE_URL"), _env("SUPABASE_KEY"))
+    return _SB_CLIENT
+
+
 def _save(tokens: dict):
+    tokens = dict(tokens)
     tokens["expires_at"] = (
         datetime.now() + timedelta(seconds=tokens.get("expires_in", 3600))
     ).isoformat()
-    TOKEN_FILE.write_text(json.dumps(tokens, indent=2, ensure_ascii=False))
+
+    try:
+        _sb().table("bling_tokens").upsert({
+            "id": 1,
+            "access_token": tokens["access_token"],
+            "refresh_token": tokens.get("refresh_token"),
+            "expires_at": tokens["expires_at"],
+        }).execute()
+    except Exception:
+        pass  # se o Supabase falhar, ainda temos o arquivo local como fallback
+
+    try:
+        TOKEN_FILE.write_text(json.dumps(tokens, indent=2, ensure_ascii=False))
+    except Exception:
+        pass
 
 
 def _load() -> dict:
+    try:
+        rows = _sb().table("bling_tokens").select("*").eq("id", 1).execute().data
+        if rows:
+            r = rows[0]
+            return {
+                "access_token": r["access_token"],
+                "refresh_token": r.get("refresh_token"),
+                "expires_at": r["expires_at"],
+            }
+    except Exception:
+        pass
+
     if TOKEN_FILE.exists():
         try:
             return json.loads(TOKEN_FILE.read_text())
@@ -129,5 +168,9 @@ def connection_error(_retries: int = 2) -> Optional[str]:
 
 
 def disconnect():
+    try:
+        _sb().table("bling_tokens").delete().eq("id", 1).execute()
+    except Exception:
+        pass
     if TOKEN_FILE.exists():
         TOKEN_FILE.unlink()
