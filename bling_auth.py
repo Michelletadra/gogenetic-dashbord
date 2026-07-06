@@ -1,7 +1,7 @@
 """OAuth2 Bling API v3 — tokens persistidos no Supabase (o disco do Streamlit
 Cloud é apagado a cada reboot/redeploy, então um arquivo local não sobrevive)."""
 import base64, json, os, time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -51,10 +51,18 @@ def _sb():
     return _SB_CLIENT
 
 
+def _parse_dt(s: str) -> datetime:
+    """Sempre retorna um datetime com timezone (UTC), aceitando strings com ou sem offset."""
+    dt = datetime.fromisoformat(s)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
 def _save(tokens: dict):
     tokens = dict(tokens)
     tokens["expires_at"] = (
-        datetime.now() + timedelta(seconds=tokens.get("expires_in", 3600))
+        datetime.now(timezone.utc) + timedelta(seconds=tokens.get("expires_in", 3600))
     ).isoformat()
 
     try:
@@ -131,8 +139,8 @@ def get_token() -> Optional[str]:
     if not tokens or not tokens.get("access_token"):
         return None
 
-    expires_at = datetime.fromisoformat(tokens.get("expires_at", "2000-01-01"))
-    if datetime.now() < expires_at - timedelta(minutes=5):
+    expires_at = _parse_dt(tokens.get("expires_at") or "2000-01-01T00:00:00+00:00")
+    if datetime.now(timezone.utc) < expires_at - timedelta(minutes=5):
         return tokens["access_token"]
 
     # Token expirado — tenta refresh
