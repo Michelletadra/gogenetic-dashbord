@@ -91,12 +91,13 @@ def _load(nome):
 with ThreadPoolExecutor(max_workers=len(NOMES)) as ex:
     raw = dict(ex.map(lambda n: _load(n), NOMES))
 
-if bling_auth.is_connected():
+_bling_ok = _bling_erro is None
+if _bling_ok:
     raw[NOME_YOU] = load_bling_data(dt_ini, dt_fim)
 
 _placeholder.empty()
 
-empresas_visiveis = NOMES + ([NOME_YOU] if bling_auth.is_connected() else [])
+empresas_visiveis = NOMES + ([NOME_YOU] if _bling_ok else [])
 
 # ── KPIs por empresa ──────────────────────────────────────────────────────────
 st.markdown("<div class='section-title'>Performance do Mês — por Empresa</div>", unsafe_allow_html=True)
