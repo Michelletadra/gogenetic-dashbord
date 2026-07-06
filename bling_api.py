@@ -98,15 +98,24 @@ class BlingClient:
     # ── Normalização ─────────────────────────────────────────────────────────
 
     @staticmethod
+    def _situacao_id(val) -> int:
+        """A Bling v3 ora retorna 'situacao' como {'id': N}, ora como N direto."""
+        if isinstance(val, dict):
+            return val.get("id", 0)
+        if isinstance(val, (int, float)):
+            return int(val)
+        return 0
+
+    @staticmethod
     def normaliza_venda(item: dict) -> dict:
         contato = item.get("contato") or {}
         return {
             "codigo":       item.get("numero") or item.get("id", ""),
             "dtVenda":      item.get("data", ""),
             "valorTotal":   item.get("totalVenda") or item.get("total", 0),
-            "nomeContato":  contato.get("nome", ""),
-            "nomeVendedor": (item.get("vendedor") or {}).get("nome", ""),
-            "situacao":     (item.get("situacao") or {}).get("id", 0),
+            "nomeContato":  contato.get("nome", "") if isinstance(contato, dict) else "",
+            "nomeVendedor": (item.get("vendedor") or {}).get("nome", "") if isinstance(item.get("vendedor"), dict) else "",
+            "situacao":     BlingClient._situacao_id(item.get("situacao")),
         }
 
     @staticmethod
@@ -118,14 +127,15 @@ class BlingClient:
             "valor":       item.get("valor", 0),
             "dtVenc":      item.get("vencimento") or item.get("dataVencimento", ""),
             "dtPgto":      item.get("dataPagamento", ""),
-            "nomeContato": contato.get("nome", ""),
-            "situacao":    (item.get("situacao") or {}).get("id", 0),
+            "nomeContato": contato.get("nome", "") if isinstance(contato, dict) else "",
+            "situacao":    BlingClient._situacao_id(item.get("situacao")),
         }
 
     @staticmethod
     def normaliza_pagamento_realizado(item: dict, cat_map: dict = None) -> dict:
-        contato  = item.get("contato") or {}
-        cat_id   = (item.get("categoria") or {}).get("id")
+        contato   = item.get("contato") or {}
+        categoria = item.get("categoria")
+        cat_id    = categoria.get("id") if isinstance(categoria, dict) else categoria
         historico = item.get("historico") or item.get("descricao") or ""
         if cat_map and cat_id and cat_id in cat_map:
             grupo    = cat_map[cat_id]["grupo"]
@@ -138,7 +148,7 @@ class BlingClient:
             "valor":           item.get("valor", 0),
             "dtPgto":          item.get("dataPagamento") or item.get("vencimento") or "",
             "dtVenc":          item.get("vencimento") or "",
-            "nomeContato":     contato.get("nome", ""),
+            "nomeContato":     contato.get("nome", "") if isinstance(contato, dict) else "",
             "situacao":        2,
             "_grupo_bling":    grupo,
             "_subgrupo_bling": subgrupo,
