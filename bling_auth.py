@@ -114,8 +114,8 @@ def connection_error() -> Optional[str]:
         return "Token expirado e o refresh falhou — reconecte."
     try:
         r = requests.get(
-            "https://api.bling.com.br/Api/v3/empresas",
-            headers={"Authorization": f"Bearer {token}"},
+            "https://api.bling.com.br/Api/v3/categorias/receitas-despesas",
+            headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
             timeout=15,
         )
         if r.status_code == 200:
