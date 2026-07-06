@@ -1,4 +1,5 @@
 """Cliente Bling API v3."""
+import threading
 import time
 from datetime import date, timedelta
 from typing import Optional
@@ -13,13 +14,15 @@ class BlingClient:
         self._token       = access_token
         self.company_name = company_name
         self._times: list = []
+        self._lock = threading.Lock()  # get_vendas/faturamento/contas_* rodam em paralelo
 
     def _rate_limit(self):
-        now = time.time()
-        self._times = [t for t in self._times if now - t < 1]
-        if len(self._times) >= 3:
-            time.sleep(0.4)
-        self._times.append(time.time())
+        with self._lock:
+            now = time.time()
+            self._times = [t for t in self._times if now - t < 1]
+            if len(self._times) >= 3:
+                time.sleep(0.4)
+            self._times.append(time.time())
 
     def _get(self, endpoint: str, params: dict = None) -> dict:
         self._rate_limit()

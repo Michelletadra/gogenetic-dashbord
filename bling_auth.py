@@ -104,7 +104,7 @@ def is_connected() -> bool:
     return connection_error() is None
 
 
-def connection_error() -> Optional[str]:
+def connection_error(_retries: int = 2) -> Optional[str]:
     """Retorna None se conectado, ou uma string com o motivo da falha."""
     tokens = _load()
     if not tokens or not tokens.get("access_token"):
@@ -120,6 +120,9 @@ def connection_error() -> Optional[str]:
         )
         if r.status_code == 200:
             return None
+        if r.status_code == 429 and _retries > 0:
+            time.sleep(3)
+            return connection_error(_retries=_retries - 1)
         return f"API do Bling respondeu {r.status_code}: {r.text[:200]}"
     except Exception as e:
         return f"Erro ao chamar API do Bling: {e}"
