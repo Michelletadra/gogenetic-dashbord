@@ -114,12 +114,81 @@ def _load_guru(dt_ini_s: str, dt_fim_s: str) -> list:
     return [GuruClient.normaliza_transacao(t) for t in txs]
 
 
+@st.cache_data(ttl=600, show_spinner=False)
+def _load_asaas_recente() -> list:
+    """Pagamentos do Asaas dos últimos 45 dias + próximos 30 — janela usada só
+    pra cruzar com pedidos novos do Guru, independente do período escolhido
+    na sidebar."""
+    from asaas_api import AsaasClient
+    key = _secret("ASAAS_API_KEY")
+    if not key:
+        return []
+    client = AsaasClient(key)
+    cust_map = client.get_customers_map()
+    dt_ini = (date.today() - timedelta(days=45)).strftime("%Y-%m-%d")
+    dt_fim = (date.today() + timedelta(days=30)).strftime("%Y-%m-%d")
+    raw = client.get_recebidos((date.today() - timedelta(days=45)).strftime("%Y-%m-%d"),
+                                date.today().strftime("%Y-%m-%d"))
+    raw += client.get_contas_receber(dt_ini, dt_fim)
+    return [AsaasClient.normaliza_pagamento(p, cust_map) for p in raw]
+
+
+def _normaliza_nome(s: str) -> str:
+    import unicodedata
+    s = unicodedata.normalize("NFKD", s or "").encode("ascii", "ignore").decode()
+    return s.lower().strip()
+
+
+def _status_pagamento_asaas(nome: str, valor: float, pagamentos: list) -> str:
+    """Procura um pagamento no Asaas do mesmo cliente com valor parecido
+    (tolerância de 5%, mínimo R$1 — Guru e Asaas podem divergir por taxas)."""
+    nome_n = _normaliza_nome(nome)
+    if not nome_n:
+        return "nao_encontrado"
+    tolerancia = max(1.0, valor * 0.05)
+    candidatos = [p for p in pagamentos if _normaliza_nome(p["nomeContato"]) == nome_n
+                  and abs(p["valor"] - valor) <= tolerancia]
+    if not candidatos:
+        return "nao_encontrado"
+    if any(p["situacao"] in ("RECEIVED", "CONFIRMED", "RECEIVED_IN_CASH") for p in candidatos):
+        return "pago"
+    return "pendente"
+
+
+BADGE_ASAAS = {
+    "pago":          "✅ Pago no Asaas",
+    "pendente":      "⏳ Aguardando pagamento no Asaas",
+    "nao_encontrado":"❓ Pagamento não encontrado no Asaas ainda",
+}
+
+
 with tab_guru:
     if not _secret("GURU_API_TOKEN"):
         st.warning("⚠️ Token do Guru não configurado (GURU_API_TOKEN).")
     else:
         with st.spinner("Carregando dados do Guru..."):
             txs = _load_guru(dt_ini_s, dt_fim_s)
+
+        import db_guru_seen
+        seen_ids = db_guru_seen.get_seen_ids()
+        novos = [t for t in txs if str(t["codigo"]) not in seen_ids]
+        if novos:
+            pagamentos_asaas = _load_asaas_recente()
+            cor = BRANDY["primary"]
+            st.markdown(
+                f'<div style="background:{cor}15;border:2px solid {cor};'
+                f'border-radius:12px;padding:16px 20px;margin-bottom:20px">',
+                unsafe_allow_html=True,
+            )
+            st.markdown(f"#### 🆕 {len(novos)} pedido(s) novo(s) desde a última vez")
+            for t in sorted(novos, key=lambda x: x["dtVenda"], reverse=True):
+                status = _status_pagamento_asaas(t["nomeContato"], float(t["valorTotal"] or 0), pagamentos_asaas)
+                st.markdown(
+                    f"**{t['nomeContato']}** · {t['produto']} · {brl(t['valorTotal'])} · "
+                    f"{t['dtVenda']} · {BADGE_ASAAS[status]}"
+                )
+            st.markdown("</div>", unsafe_allow_html=True)
+            db_guru_seen.mark_seen([t["codigo"] for t in novos])
 
         if not txs:
             st.info("Nenhuma transação no período.")
