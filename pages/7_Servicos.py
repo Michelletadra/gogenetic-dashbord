@@ -7,6 +7,7 @@ from datetime import date, timedelta
 from utils import (GLOBAL_CSS, BRAND, brl, soma, kpi_card, plotly_layout,
                    sidebar_header, get_clients, tabela_marcavel)
 import db_faturar_tracking
+import db_servico_notas
 
 st.set_page_config(page_title="Serviços | GoGenetic", page_icon="🔬", layout="wide")
 st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
@@ -368,6 +369,75 @@ else:
                 key=f"dl_{key_suffix}",
             )
 
+    def tabela_faturar_com_notas(df_t: pd.DataFrame):
+        """Igual a tabela_servico, mas com uma coluna 'Anotações' editável e
+        persistida no Supabase (servico_notas) — só usada na aba A Faturar."""
+        if df_t.empty:
+            st.info("Nenhum registro nesta categoria.")
+            return
+        existing = [c for c in cols_map if c in df_t.columns]
+        df_render = df_t[existing].rename(columns=cols_map).copy()
+        df_render["Valor"] = df_render["Valor"].apply(brl)
+
+        if "Dias" in df_render.columns:
+            pos = df_render.columns.get_loc("Dias") + 1
+            df_render.insert(pos, "Em Faturar", df_render["Dias"].apply(_tag_urgencia))
+
+        df_render = df_render.reset_index(drop=True)
+
+        codigos = df_render["Cód."].astype(str).tolist()
+        notas_map = db_servico_notas.get_notas(codigos)
+        df_render["Anotações"] = df_render["Cód."].astype(str).map(notas_map).fillna("")
+
+        col_cfg = {
+            "Dias":        st.column_config.NumberColumn("Dias", help="Dias em Faturar (desde que entrou nessa situação)", width="small"),
+            "Em Faturar":  st.column_config.TextColumn("Em Faturar", help="Tempo parado em Faturar: 🟢 até 7 dias · 🟡 8-15 dias · 🔴 mais de 15 dias", width="small"),
+            "Situação OS": st.column_config.TextColumn("Situação OS", width="medium"),
+            "Cliente":     st.column_config.TextColumn("Cliente", width="large"),
+            "Valor":       st.column_config.TextColumn("Valor", width="small"),
+            "Anotações":   st.column_config.TextColumn("Anotações", width="large", help="Escreva uma anotação sobre esse serviço"),
+        }
+        outras_cols = [c for c in df_render.columns if c != "Anotações"]
+
+        edited = st.data_editor(
+            df_render,
+            use_container_width=True,
+            hide_index=True,
+            num_rows="fixed",
+            disabled=outras_cols,
+            column_config=col_cfg,
+            key="editor_faturar",
+        )
+
+        for codigo, nota_nova in zip(edited["Cód."].astype(str), edited["Anotações"]):
+            nota_nova = (nota_nova or "").strip()
+            if nota_nova != (notas_map.get(codigo, "") or "").strip():
+                db_servico_notas.save_nota(codigo, nota_nova)
+
+        col_info, col_soma, col_export = st.columns([2, 2, 1])
+        with col_info:
+            st.caption(f"Total: {len(df_t)} serviços")
+        with col_soma:
+            st.markdown(
+                f"<div style='background:#F5F0FA;border:1px solid rgba(126,22,184,0.2);border-radius:8px;"
+                f"padding:8px 16px;text-align:right'>"
+                f"<span style='font-size:.72rem;color:#8B6BAE;text-transform:uppercase;letter-spacing:1px'>Total filtrado</span><br>"
+                f"<span style='font-size:1.3rem;font-weight:700;color:#1A1033'>{brl(df_t['valorTotal'].sum())}</span>"
+                f"</div>", unsafe_allow_html=True,
+            )
+        with col_export:
+            buf = io.BytesIO()
+            with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+                edited.to_excel(writer, index=False, sheet_name="Serviços")
+            st.download_button(
+                label="📥 Excel",
+                data=buf.getvalue(),
+                file_name=f"servicos_faturar_{date.today().strftime('%Y%m%d')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+                key="dl_faturar",
+            )
+
     with tab_exec:
         cols_exec = {
             "codigo":            "Cód.",
@@ -433,7 +503,7 @@ else:
         tabela_servico(df_aprov, "aprovados")
 
     with tab_fat:
-        tabela_servico(df_faturar, "faturar", mostrar_urgencia=True)
+        tabela_faturar_com_notas(df_faturar)
 
     with tab_inv:
         tabela_servico(df_invoice, "invoice")
