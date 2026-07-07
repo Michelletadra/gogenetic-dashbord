@@ -496,17 +496,25 @@ def _bling_client_holder() -> dict:
 
 
 def get_bling_client():
-    """Retorna BlingClient se autenticado, None caso contrário."""
+    """Retorna BlingClient se autenticado, None caso contrário.
+
+    O client fica cacheado em `_bling_client_holder()`, mas o access_token pode
+    expirar e ser renovado (via bling_auth.get_token()) entre uma chamada e
+    outra — por isso o token é resincronizado na instância cacheada a cada
+    chamada, em vez de ficar preso no valor usado na criação.
+    """
     holder = _bling_client_holder()
-    if holder["client"] is not None:
-        return holder["client"]
     try:
         import bling_auth
         import bling_api
         token = bling_auth.get_token()
-        if token:
+        if not token:
+            return None
+        if holder["client"] is None:
             holder["client"] = bling_api.BlingClient(token, NOME_YOU)
-            return holder["client"]
+        else:
+            holder["client"]._token = token
+        return holder["client"]
     except Exception:
         pass
     return None
