@@ -230,9 +230,8 @@ else:
     df_base["dtVenda"] = df_base["dtVenda_sort"].dt.strftime("%d/%m/%Y")
 
     # Data de entrega
-    df_base["Entrega"] = pd.to_datetime(
-        df_base.get("dtEntrega", pd.Series(dtype=str)), errors="coerce"
-    ).dt.strftime("%d/%m/%Y").fillna("—")
+    df_base["Entrega_dt"] = pd.to_datetime(df_base.get("dtEntrega", pd.Series(dtype=str)), errors="coerce")
+    df_base["Entrega"] = df_base["Entrega_dt"].dt.strftime("%d/%m/%Y").fillna("—")
 
     # Código S das palavras-chave (ex: S6944)
     def _cod_s(tags):
@@ -450,6 +449,23 @@ else:
             "situacaoOS":        "Situação OS",
             "valorTotal":        "Valor",
         }
+        if not df_exec.empty:
+            datas_entrega = df_exec["Entrega_dt"].dropna()
+            if not datas_entrega.empty:
+                filtrar_entrega = st.checkbox("📅 Filtrar por data de entrega", key="filtro_entrega_check")
+                if filtrar_entrega:
+                    min_ent, max_ent = datas_entrega.min().date(), datas_entrega.max().date()
+                    ce1, ce2 = st.columns(2)
+                    ent_ini = ce1.date_input("Entrega de", value=min_ent, min_value=min_ent, max_value=max_ent, key="ent_ini")
+                    ent_fim = ce2.date_input("Entrega até", value=max_ent, min_value=min_ent, max_value=max_ent, key="ent_fim")
+                    df_exec = df_exec[
+                        df_exec["Entrega_dt"].notna()
+                        & (df_exec["Entrega_dt"].dt.date >= ent_ini)
+                        & (df_exec["Entrega_dt"].dt.date <= ent_fim)
+                    ]
+                    if df_exec.empty:
+                        st.info("Nenhum serviço com entrega nesse intervalo.")
+
         if not df_exec.empty:
             existing = [c for c in cols_exec if c in df_exec.columns]
             df_render_exec = df_exec[existing].rename(columns=cols_exec).copy()
