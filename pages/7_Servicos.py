@@ -28,6 +28,18 @@ COR_STATUS = {
 STATUS_ATIVOS = ["Em execução", "Aprovado", "Faturar", "Invoice", "Em espera", "Consumo de crédito", "NF Emitida"]
 STATUS_TODOS  = list(COR_STATUS.keys())
 
+
+# ── Carrega dados ──────────────────────────────────────────────────────────────
+@st.cache_data(ttl=300, show_spinner=False)
+def load_servicos(dt_ini_str: str, dt_fim_str: str) -> list:
+    try:
+        client = get_clients()["GoGenetic Pesquisa"]
+        return client.get_servicos(dt_ini_str, dt_fim_str)
+    except Exception as exc:
+        st.error(f"Erro ao carregar serviços: {exc}")
+        return []
+
+
 # ── Sidebar ────────────────────────────────────────────────────────────────────
 sidebar_header()
 
@@ -77,17 +89,6 @@ with st.sidebar:
         load_servicos.clear()
         st.rerun()
     st.caption("⏱ Cache: 5 min")
-
-
-# ── Carrega dados ──────────────────────────────────────────────────────────────
-@st.cache_data(ttl=300, show_spinner=False)
-def load_servicos(dt_ini_str: str, dt_fim_str: str) -> list:
-    try:
-        client = get_clients()["GoGenetic Pesquisa"]
-        return client.get_servicos(dt_ini_str, dt_fim_str)
-    except Exception as exc:
-        st.error(f"Erro ao carregar serviços: {exc}")
-        return []
 
 
 with st.spinner("Carregando serviços..."):
