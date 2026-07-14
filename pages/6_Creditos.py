@@ -2,7 +2,6 @@
 import io
 import streamlit as st
 import pandas as pd
-import plotly.express as px
 from collections import defaultdict
 from datetime import date, timedelta
 from openpyxl import Workbook
@@ -206,31 +205,6 @@ with tab_dash:
                 </span></div>
               <b style='color:#F59E0B'>{brl(row['saldo'])}</b>
             </div>""", unsafe_allow_html=True)
-
-    # Gráficos
-    if not df.empty:
-        g1, g2 = st.columns(2)
-        with g1:
-            st.markdown("**Top 10 Clientes — Saldo válido**")
-            if not df_validos.empty:
-                top = df_validos.groupby("cliente_nome")["saldo"].sum().reset_index()
-                top = top.sort_values("saldo", ascending=False).head(10)
-                fig = px.bar(top, x="saldo", y="cliente_nome", orientation="h",
-                             color_discrete_sequence=["#7E16B8"],
-                             labels={"saldo": "Saldo (R$)", "cliente_nome": ""})
-                fig.update_layout(yaxis=dict(autorange="reversed"),
-                                  plot_bgcolor="#fff", paper_bgcolor="#fff",
-                                  margin=dict(l=0, r=0, t=0, b=0))
-                st.plotly_chart(fig, use_container_width=True)
-        with g2:
-            st.markdown("**Distribuição por Status**")
-            ds = df.groupby("status")["saldo"].sum().reset_index()
-            cores = {"VÁLIDO":"#10B981","EXPIRADO":"#EF4444","UTILIZADO":"#6B7280","CANCELADO":"#F59E0B"}
-            fig2 = px.pie(ds, names="status", values="saldo",
-                          color="status", color_discrete_map=cores, hole=0.4)
-            fig2.update_layout(plot_bgcolor="#fff", paper_bgcolor="#fff",
-                               margin=dict(l=0, r=0, t=0, b=0))
-            st.plotly_chart(fig2, use_container_width=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 2 — CLIENTES
