@@ -101,6 +101,20 @@ def _clear_and_rerun():
     _load_contratos.clear()
     st.rerun()
 
+def _tabs_persist(options: list, key: str) -> str:
+    """Como st.tabs(), mas lembra qual aba estava selecionada entre reruns
+    (st.tabs volta sempre pra primeira aba a cada rerun, o que derrubava
+    o usuário de volta pro Painel no meio de um cadastro)."""
+    last = st.session_state.get(key, options[0])
+    if last not in options:
+        last = options[0]
+    sel = st.segmented_control(key, options, default=last, key=f"{key}_widget",
+                                label_visibility="collapsed")
+    if sel is None:
+        sel = last
+    st.session_state[key] = sel
+    return sel
+
 _data        = _load_all()
 clientes_all = _data["clientes"]
 creditos_all = _data["creditos"]
@@ -132,14 +146,15 @@ def _resumo_mem(cli_id: int) -> dict:
     }
 
 # ── Tabs principais ───────────────────────────────────────────────────────────
-tab_dash, tab_clientes, tab_creditos, tab_movs, tab_relatorio = st.tabs([
-    "📊 Painel", "🧑‍🤝‍🧑 Clientes", "💳 Créditos", "📋 Movimentações", "📑 Relatório Mensal"
-])
+main_tab = _tabs_persist(
+    ["📊 Painel", "🧑‍🤝‍🧑 Clientes", "💳 Créditos", "📋 Movimentações", "📑 Relatório Mensal"],
+    key="cred_main_tab",
+)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 1 — PAINEL
 # ══════════════════════════════════════════════════════════════════════════════
-with tab_dash:
+if main_tab == "📊 Painel":
     df = pd.DataFrame(creditos_all) if creditos_all else pd.DataFrame()
 
     if not df.empty:
@@ -209,7 +224,7 @@ with tab_dash:
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 2 — CLIENTES
 # ══════════════════════════════════════════════════════════════════════════════
-with tab_clientes:
+if main_tab == "🧑‍🤝‍🧑 Clientes":
     cli_opts = {c["nome"]: c["id"] for c in clientes_all}
 
     col1, col2 = st.columns([3, 1])
@@ -276,13 +291,16 @@ with tab_clientes:
         k3c.metric("Saldo válido",        brl(res.get("saldo_valido", 0)))
         k4c.metric("Total utilizado",     brl(res.get("total_utilizado", 0)))
 
-        sub1, sub2, sub3, sub4 = st.tabs(["💳 Créditos", "📄 Notas Fiscais", "📋 Movimentações", "📑 Contratos"])
+        cli_sub_tab = _tabs_persist(
+            ["💳 Créditos", "📄 Notas Fiscais", "📋 Movimentações", "📑 Contratos"],
+            key="cred_cli_subtab",
+        )
 
         creds_cli     = _cred_by_cli.get(cli["id"], [])
         notas_cli     = _nota_by_cli.get(cli["id"], [])
         movs_cli      = _mov_by_cli.get(cli["id"], [])
 
-        with sub1:
+        if cli_sub_tab == "💳 Créditos":
             if not creds_cli:
                 st.info("Sem créditos.")
             else:
@@ -317,7 +335,7 @@ with tab_clientes:
                                     st.success(f"✅ {brl(v)} consumido!")
                                     _clear_and_rerun()
 
-        with sub2:
+        if cli_sub_tab == "📄 Notas Fiscais":
             if notas_cli:
                 for nf in notas_cli:
                     cols = st.columns([3, 2, 2, 1])
@@ -348,7 +366,7 @@ with tab_clientes:
                         st.success(f"✅ NF {num_nf} cadastrada!")
                         _clear_and_rerun()
 
-        with sub3:
+        if cli_sub_tab == "📋 Movimentações":
             if not movs_cli:
                 st.info("Sem movimentações.")
             else:
@@ -373,7 +391,7 @@ with tab_clientes:
                 df_show.rename(columns=rename, inplace=True)
                 st.dataframe(df_show.fillna("—"), use_container_width=True, hide_index=True)
 
-        with sub4:
+        if cli_sub_tab == "📑 Contratos":
             contratos_cli = _get_cont_by_cli().get(cli["id"], [])
             if not contratos_cli:
                 st.info("Nenhum contrato vinculado a este cliente.")
@@ -402,7 +420,7 @@ with tab_clientes:
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 3 — CRÉDITOS
 # ══════════════════════════════════════════════════════════════════════════════
-with tab_creditos:
+if main_tab == "💳 Créditos":
     cli_opts = {c["nome"]: c["id"] for c in clientes_all}
 
     col1, col2 = st.columns(2)
@@ -411,9 +429,12 @@ with tab_creditos:
     cli_f    = col2.selectbox("Cliente", ["Todos"] + list(cli_opts.keys()), key="cli_f_cred")
     cli_id_f = cli_opts.get(cli_f) if cli_f != "Todos" else None
 
-    lista_tab, novo_tab, consumo_tab = st.tabs(["📋 Lista", "➕ Novo Crédito", "💸 Registrar Consumo"])
+    cred_action = _tabs_persist(
+        ["📋 Lista", "➕ Novo Crédito", "💸 Registrar Consumo"],
+        key="cred_creditos_subtab",
+    )
 
-    with lista_tab:
+    if cred_action == "📋 Lista":
         # Filter in memory
         creds_tab = creditos_all
         if status_sel:
@@ -469,38 +490,77 @@ with tab_creditos:
                 else:
                     st.info("Nenhum crédito válido para expirar.")
 
-    with novo_tab:
+    if cred_action == "➕ Novo Crédito":
         if not clientes_all:
-            st.warning("Cadastre um cliente primeiro.")
+            st.warning("Cadastre um cliente primeiro na aba 🧑‍🤝‍🧑 Clientes.")
         else:
-            with st.form("form_novo_cred_dash", clear_on_submit=True):
-                cli_sel  = st.selectbox("Cliente *", list(cli_opts.keys()))
-                notas_cl = _nota_by_cli.get(cli_opts.get(cli_sel), [])
-                nf_opts  = {"— Sem NF —": None}
-                nf_opts.update({f"NF {n['numero_nf']}": n["id"] for n in notas_cl})
-                c1, c2  = st.columns(2)
-                nf_sel  = c1.selectbox("NF vinculada", list(nf_opts.keys()))
-                valor   = c2.number_input("Valor (R$) *", min_value=0.01, step=0.01, format="%.2f")
-                venc    = c1.date_input("Vencimento *")
-                obs     = c2.text_area("Observações", height=80)
-                # Vínculo com contrato
-                _contratos_all = _list_contratos_all()
-                _ct_opts = {"— Sem contrato —": None}
-                _ct_opts.update({
-                    f"{c['contratante']} ({c['empresa_gg']}) · {c.get('tipo_contrato','—')}": c["id"]
-                    for c in _contratos_all
-                    if c["status_real"] not in ("ENCERRADO","RESCINDIDO")
-                })
-                ct_sel = st.selectbox("Contrato vinculado", list(_ct_opts.keys()))
-                if st.form_submit_button("➕ Cadastrar", use_container_width=True):
-                    insert_credito({"cliente_id": cli_opts[cli_sel], "nota_fiscal_id": nf_opts[nf_sel],
-                                    "valor_original": float(valor), "data_vencimento": str(venc),
-                                    "observacoes": obs or None,
-                                    "contrato_id": _ct_opts[ct_sel]})
-                    st.success("✅ Crédito cadastrado!")
-                    _clear_and_rerun()
+            st.markdown("##### 1️⃣ Cliente")
+            busca_nc = st.text_input("🔎 Buscar cliente", key="busca_novo_cred",
+                                      placeholder="Digite parte do nome…")
+            cli_opts_nc = {c["nome"]: c["id"] for c in clientes_all
+                           if not busca_nc or busca_nc.lower() in c["nome"].lower()}
 
-    with consumo_tab:
+            if not cli_opts_nc:
+                st.info("Nenhum cliente encontrado com esse nome.")
+            else:
+                cli_sel    = st.selectbox("Cliente *", list(cli_opts_nc.keys()), key="cli_sel_novo_cred")
+                cli_id_sel = cli_opts_nc[cli_sel]
+                notas_cl   = _nota_by_cli.get(cli_id_sel, [])
+                nf_opts    = {"— Sem NF —": None}
+                nf_opts.update({f"NF {n['numero_nf']}": n["id"] for n in notas_cl})
+
+                st.markdown("##### 2️⃣ Dados do crédito")
+                with st.form("form_novo_cred_dash", clear_on_submit=True):
+                    c1, c2 = st.columns(2)
+                    valor  = c1.number_input("Valor (R$) *", min_value=0.01, step=0.01, format="%.2f")
+                    venc   = c2.date_input("Vencimento *")
+                    nf_sel = st.selectbox("NF vinculada (opcional)", list(nf_opts.keys()))
+
+                    with st.expander("➕ Mais detalhes (opcional)"):
+                        obs = st.text_area("Observações", height=80)
+                        contratos_flat = [
+                            ct for lst in _get_cont_by_cli().values() for ct in lst
+                            if ct.get("status_real") not in ("ENCERRADO", "RESCINDIDO")
+                        ]
+                        ct_opts = {"— Sem contrato —": None}
+                        ct_opts.update({
+                            f"{ct.get('contratante','?')} ({ct.get('empresa_gg','—')}) · {ct.get('tipo_contrato','—')}": ct.get("id")
+                            for ct in contratos_flat
+                        })
+                        ct_sel = st.selectbox("Contrato vinculado", list(ct_opts.keys()))
+
+                    if st.form_submit_button("➕ Cadastrar crédito", use_container_width=True):
+                        payload = {
+                            "cliente_id":      cli_id_sel,
+                            "nota_fiscal_id":  nf_opts[nf_sel],
+                            "valor_original":  float(valor),
+                            "data_vencimento": str(venc),
+                            "observacoes":     obs or None,
+                            "contrato_id":     ct_opts[ct_sel],
+                        }
+                        try:
+                            insert_credito(payload)
+                            st.success(f"✅ Crédito de {brl(valor)} cadastrado para {cli_sel}!")
+                            _clear_and_rerun()
+                        except Exception as e:
+                            if "contrato_id" in str(e):
+                                # Coluna contrato_id ainda não existe na tabela do Supabase —
+                                # cadastra o crédito mesmo assim, só sem o vínculo com o contrato.
+                                try:
+                                    payload.pop("contrato_id")
+                                    insert_credito(payload)
+                                    st.success(f"✅ Crédito de {brl(valor)} cadastrado para {cli_sel}!")
+                                    if ct_opts[ct_sel] is not None:
+                                        st.warning("⚠️ O vínculo com o contrato não foi salvo — "
+                                                   "falta uma coluna no banco (peça pra rodar a "
+                                                   "migração pendente do Supabase).")
+                                    _clear_and_rerun()
+                                except Exception as e2:
+                                    st.error(f"❌ Não foi possível cadastrar o crédito: {e2}")
+                            else:
+                                st.error(f"❌ Não foi possível cadastrar o crédito: {e}")
+
+    if cred_action == "💸 Registrar Consumo":
         creds_validos = [c for c in creditos_all if c["status"] == "VÁLIDO"]
         if not creds_validos:
             st.info("Nenhum crédito válido disponível.")
@@ -568,7 +628,7 @@ with tab_creditos:
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 4 — MOVIMENTAÇÕES
 # ══════════════════════════════════════════════════════════════════════════════
-with tab_movs:
+if main_tab == "📋 Movimentações":
     import io
     cli_opts = {c["nome"]: c["id"] for c in clientes_all}
 
@@ -625,7 +685,7 @@ with tab_movs:
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 5 — RELATÓRIO MENSAL
 # ══════════════════════════════════════════════════════════════════════════════
-with tab_relatorio:
+if main_tab == "📑 Relatório Mensal":
     from utils import MESES_PT
 
     hoje_r  = date.today()
