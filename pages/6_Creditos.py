@@ -158,7 +158,7 @@ with tab_dash:
         df_validos = df_expirad = df_venc30 = df_venc7 = pd.DataFrame()
         hoje = pd.Timestamp.today().normalize()
 
-    k1, k2, k3, k4, k5 = st.columns(5)
+    k1, k2, k3, k4 = st.columns(4)
     def _kpi(col, icon, label, valor, sub="", cor="#1A0A2E"):
         col.markdown(f"""
         <div style='background:#fff;border-radius:12px;padding:16px 20px;
@@ -170,13 +170,11 @@ with tab_dash:
 
     _kpi(k1,"💚","Saldo Válido",   brl(df_validos["saldo"].sum() if not df_validos.empty else 0),
          f"{len(df_validos)} crédito(s)", "#10B981")
-    _kpi(k2,"❌","Total Expirado", brl(df_expirad["saldo"].sum() if not df_expirad.empty else 0),
-         f"{len(df_expirad)} crédito(s)", "#EF4444")
-    _kpi(k3,"⚠️","Vencendo 30d",  brl(df_venc30["saldo"].sum() if not df_venc30.empty else 0),
+    _kpi(k2,"⚠️","Vencendo 30d",  brl(df_venc30["saldo"].sum() if not df_venc30.empty else 0),
          f"{len(df_venc30)} crédito(s)", "#F59E0B")
-    _kpi(k4,"🚨","Vencendo 7d",   brl(df_venc7["saldo"].sum() if not df_venc7.empty else 0),
+    _kpi(k3,"🚨","Vencendo 7d",   brl(df_venc7["saldo"].sum() if not df_venc7.empty else 0),
          f"{len(df_venc7)} crédito(s)", "#EF4444" if not df_venc7.empty else "#6B7280")
-    _kpi(k5,"👥","Clientes",      str(len(clientes_all)), "cadastrados")
+    _kpi(k4,"👥","Clientes",      str(len(clientes_all)), "cadastrados")
 
     st.markdown("<br>", unsafe_allow_html=True)
 
