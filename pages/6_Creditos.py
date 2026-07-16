@@ -129,6 +129,9 @@ _cred_map    = _data["cred_map"]
 def _get_cont_by_cli():
     return _load_contratos()
 
+def _nf_label(numero_nf) -> str:
+    return f"NF {numero_nf}" if numero_nf else "Sem NF"
+
 def _resumo_mem(cli_id: int) -> dict:
     """Resumo do cliente — lê direto dos índices já em cache."""
     creds  = _cred_by_cli.get(cli_id, [])
@@ -202,7 +205,7 @@ if main_tab == "📊 Painel":
                         padding:10px 16px;margin-bottom:6px;display:flex;justify-content:space-between'>
               <div><b>{row.get('cliente_nome','—')}</b>
                 <span style='color:#8B6BAE;font-size:.85rem;margin-left:10px'>
-                  NF {row.get('numero_nf','—')} · Vence em {dias} dia{'s' if dias != 1 else ''}
+                  {_nf_label(row.get('numero_nf'))} · Vence em {dias} dia{'s' if dias != 1 else ''}
                 </span></div>
               <b style='color:#EF4444'>{brl(row['saldo'])}</b>
             </div>""", unsafe_allow_html=True)
@@ -216,7 +219,7 @@ if main_tab == "📊 Painel":
                         padding:10px 16px;margin-bottom:6px;display:flex;justify-content:space-between'>
               <div><b>{row.get('cliente_nome','—')}</b>
                 <span style='color:#8B6BAE;font-size:.85rem;margin-left:10px'>
-                  NF {row.get('numero_nf','—')} · {dias} dias
+                  {_nf_label(row.get('numero_nf'))} · {dias} dias
                 </span></div>
               <b style='color:#F59E0B'>{brl(row['saldo'])}</b>
             </div>""", unsafe_allow_html=True)
@@ -311,7 +314,7 @@ if main_tab == "🧑‍🤝‍🧑 Clientes":
                     alerta = ""
                     if cr["status"] == "VÁLIDO" and dias is not None:
                         alerta = "🔴 " if dias <= 7 else ("🟡 " if dias <= 30 else "🟢 ")
-                    nf_label = f"NF {cr.get('numero_nf','—')}"
+                    nf_label = _nf_label(cr.get('numero_nf'))
                     with st.expander(f"{alerta}{nf_label}  ·  {brl(saldo_cr)}  ·  {cr['status']}"):
                         ca, cb, cc = st.columns(3)
                         ca.metric("Original",  brl(cr["valor_original"]))
@@ -461,7 +464,7 @@ if main_tab == "💳 Créditos":
                 rows_cr.append({
                     "":          alerta,
                     "Cliente":   cr.get("cliente_nome","—"),
-                    "NF":        cr.get("numero_nf","—"),
+                    "NF":        cr.get("numero_nf") or "—",
                     "Original":  cr.get("valor_original", 0),
                     "Utilizado": cr.get("valor_utilizado", 0),
                     "Saldo":     saldo,
@@ -480,7 +483,7 @@ if main_tab == "💳 Créditos":
                 validos_tab = [cr for cr in creds_tab if cr["status"] == "VÁLIDO"]
                 if validos_tab:
                     opts_exp = {
-                        f"{cr.get('cliente_nome','?')} — NF {cr.get('numero_nf','—')}": cr["id"]
+                        f"{cr.get('cliente_nome','?')} — {_nf_label(cr.get('numero_nf'))}": cr["id"]
                         for cr in validos_tab
                     }
                     sel_exp = st.selectbox("Crédito:", list(opts_exp.keys()), key="sel_exp")
@@ -494,6 +497,12 @@ if main_tab == "💳 Créditos":
         if not clientes_all:
             st.warning("Cadastre um cliente primeiro na aba 🧑‍🤝‍🧑 Clientes.")
         else:
+            # Confirmação do último cadastro — fica visível até a próxima ação
+            # (antes sumia junto com o rerun, e por não notar que já tinha
+            # funcionado, cadastros repetidos sem querer criavam créditos duplicados).
+            if st.session_state.get("_novo_cred_ok"):
+                st.success(st.session_state.pop("_novo_cred_ok"))
+
             st.markdown("##### 1️⃣ Cliente")
             busca_nc = st.text_input("🔎 Buscar cliente", key="busca_novo_cred",
                                       placeholder="Digite parte do nome…")
@@ -512,8 +521,10 @@ if main_tab == "💳 Créditos":
                 st.markdown("##### 2️⃣ Dados do crédito")
                 with st.form("form_novo_cred_dash", clear_on_submit=True):
                     c1, c2 = st.columns(2)
-                    valor  = c1.number_input("Valor (R$) *", min_value=0.01, step=0.01, format="%.2f")
-                    venc   = c2.date_input("Vencimento *")
+                    valor  = c1.number_input("Valor (R$) *", min_value=0.0, step=0.01, format="%.2f",
+                                              help="Digite o valor real do crédito antes de cadastrar.")
+                    venc   = c2.date_input("Vencimento *", value=date.today() + timedelta(days=30),
+                                            help="Data até quando o crédito vale. Ajuste conforme o combinado com o cliente.")
                     nf_sel = st.selectbox("NF vinculada (opcional)", list(nf_opts.keys()))
 
                     with st.expander("➕ Mais detalhes (opcional)"):
@@ -530,35 +541,40 @@ if main_tab == "💳 Créditos":
                         ct_sel = st.selectbox("Contrato vinculado", list(ct_opts.keys()))
 
                     if st.form_submit_button("➕ Cadastrar crédito", use_container_width=True):
-                        payload = {
-                            "cliente_id":      cli_id_sel,
-                            "nota_fiscal_id":  nf_opts[nf_sel],
-                            "valor_original":  float(valor),
-                            "data_vencimento": str(venc),
-                            "observacoes":     obs or None,
-                            "contrato_id":     ct_opts[ct_sel],
-                        }
-                        try:
-                            insert_credito(payload)
-                            st.success(f"✅ Crédito de {brl(valor)} cadastrado para {cli_sel}!")
-                            _clear_and_rerun()
-                        except Exception as e:
-                            if "contrato_id" in str(e):
-                                # Coluna contrato_id ainda não existe na tabela do Supabase —
-                                # cadastra o crédito mesmo assim, só sem o vínculo com o contrato.
-                                try:
-                                    payload.pop("contrato_id")
-                                    insert_credito(payload)
-                                    st.success(f"✅ Crédito de {brl(valor)} cadastrado para {cli_sel}!")
-                                    if ct_opts[ct_sel] is not None:
-                                        st.warning("⚠️ O vínculo com o contrato não foi salvo — "
-                                                   "falta uma coluna no banco (peça pra rodar a "
-                                                   "migração pendente do Supabase).")
-                                    _clear_and_rerun()
-                                except Exception as e2:
-                                    st.error(f"❌ Não foi possível cadastrar o crédito: {e2}")
-                            else:
-                                st.error(f"❌ Não foi possível cadastrar o crédito: {e}")
+                        if valor < 1:
+                            st.error(f"❌ Valor muito baixo ({brl(valor)}). "
+                                     f"Confirme se digitou o valor certo antes de cadastrar.")
+                        else:
+                            payload = {
+                                "cliente_id":      cli_id_sel,
+                                "nota_fiscal_id":  nf_opts[nf_sel],
+                                "valor_original":  float(valor),
+                                "data_vencimento": str(venc),
+                                "observacoes":     obs or None,
+                                "contrato_id":     ct_opts[ct_sel],
+                            }
+                            try:
+                                insert_credito(payload)
+                                st.session_state["_novo_cred_ok"] = f"✅ Crédito de {brl(valor)} cadastrado para {cli_sel}!"
+                                _clear_and_rerun()
+                            except Exception as e:
+                                if "contrato_id" in str(e):
+                                    # Coluna contrato_id ainda não existe na tabela do Supabase —
+                                    # cadastra o crédito mesmo assim, só sem o vínculo com o contrato.
+                                    try:
+                                        payload.pop("contrato_id")
+                                        insert_credito(payload)
+                                        msg = f"✅ Crédito de {brl(valor)} cadastrado para {cli_sel}!"
+                                        if ct_opts[ct_sel] is not None:
+                                            msg += (" ⚠️ O vínculo com o contrato não foi salvo — falta "
+                                                     "uma coluna no banco (peça pra rodar a migração "
+                                                     "pendente do Supabase).")
+                                        st.session_state["_novo_cred_ok"] = msg
+                                        _clear_and_rerun()
+                                    except Exception as e2:
+                                        st.error(f"❌ Não foi possível cadastrar o crédito: {e2}")
+                                else:
+                                    st.error(f"❌ Não foi possível cadastrar o crédito: {e}")
 
     if cred_action == "💸 Registrar Consumo":
         creds_validos = [c for c in creditos_all if c["status"] == "VÁLIDO"]
@@ -566,7 +582,7 @@ if main_tab == "💳 Créditos":
             st.info("Nenhum crédito válido disponível.")
         else:
             opts = {
-                f"{c.get('cliente_nome','?')} — NF {c.get('numero_nf','—')} — Saldo: {brl((c['valor_original'] or 0)-(c['valor_utilizado'] or 0))}": c
+                f"{c.get('cliente_nome','?')} — {_nf_label(c.get('numero_nf'))} — Saldo: {brl((c['valor_original'] or 0)-(c['valor_utilizado'] or 0))}": c
                 for c in creds_validos
             }
             with st.form("form_consumo_dash", clear_on_submit=True):
