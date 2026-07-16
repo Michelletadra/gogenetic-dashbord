@@ -523,6 +523,19 @@ if main_tab == "💳 Créditos":
                 df_creds_show[col_brl] = df_creds_show[col_brl].apply(brl)
             st.dataframe(df_creds_show, use_container_width=True, hide_index=True)
 
+            import io as _io
+            buf_lista = _io.BytesIO()
+            with pd.ExcelWriter(buf_lista, engine="openpyxl") as writer:
+                df_creds_show.drop(columns=[""]).to_excel(writer, index=False, sheet_name="Creditos")
+            status_lbl = "+".join(status_sel) if status_sel else "Todos"
+            st.download_button(
+                f"📥 Exportar Excel ({len(creds_tab)} crédito{'s' if len(creds_tab) != 1 else ''} — {status_lbl})",
+                data=buf_lista.getvalue(),
+                file_name=f"creditos_{status_lbl.lower()}_{date.today().strftime('%Y%m%d')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="dl_lista_creditos",
+            )
+
             # Editar um crédito existente (valor, vencimento, status)
             with st.expander("✏️ Editar um crédito"):
                 opts_edit = {
