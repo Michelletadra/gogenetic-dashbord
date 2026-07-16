@@ -132,6 +132,36 @@ def _get_cont_by_cli():
 def _nf_label(numero_nf) -> str:
     return f"NF {numero_nf}" if numero_nf else "Sem NF"
 
+def _parse_valor(texto: str):
+    """Converte texto digitado em R$ pra float — aceita '2500', '2500.00',
+    '2500,00' e '2.500,00' (o campo numérico nativo do navegador só aceita
+    ponto e rejeita vírgula, o que fazia o valor digitado sumir/dar errado)."""
+    if not texto:
+        return None
+    t = texto.strip().replace("R$", "").replace(" ", "")
+    if not t:
+        return None
+    if "," in t:
+        t = t.replace(".", "").replace(",", ".")
+    try:
+        val = float(t)
+    except ValueError:
+        return None
+    return val if val >= 0 else None
+
+def _valor_input(label: str, key: str, valor_atual: float = None, help: str = None) -> tuple:
+    """Campo de texto pra valores em R$ — mostra o valor interpretado embaixo
+    pra confirmar antes de salvar. Retorna (valor_float_ou_None, texto_digitado)."""
+    default = f"{valor_atual:.2f}".replace(".", ",") if valor_atual is not None else ""
+    texto = st.text_input(label, value=default, key=key,
+                           placeholder="ex: 2500,00", help=help)
+    val = _parse_valor(texto)
+    if texto and val is None:
+        st.caption("⚠️ Não entendi esse valor — use só números, vírgula e ponto.")
+    elif val is not None:
+        st.caption(f"= {brl(val)}")
+    return val, texto
+
 def _resumo_mem(cli_id: int) -> dict:
     """Resumo do cliente — lê direto dos índices já em cache."""
     creds  = _cred_by_cli.get(cli_id, [])
@@ -304,6 +334,8 @@ if main_tab == "🧑‍🤝‍🧑 Clientes":
         movs_cli      = _mov_by_cli.get(cli["id"], [])
 
         if cli_sub_tab == "💳 Créditos":
+            if st.session_state.get("_consumo_cli_ok"):
+                st.success(st.session_state.pop("_consumo_cli_ok"))
             if not creds_cli:
                 st.info("Sem créditos.")
             else:
@@ -323,20 +355,24 @@ if main_tab == "🧑‍🤝‍🧑 Clientes":
                         if dias is not None:
                             st.caption(f"Vencimento: {venc.strftime('%d/%m/%Y')} · {dias} dias")
                         if cr["status"] == "VÁLIDO" and saldo_cr > 0:
+                            v, _ = _valor_input("Valor a consumir", key=f"v_cons_{cr['id']}",
+                                                 help=f"Máximo disponível: {brl(saldo_cr)}")
                             with st.form(f"cons_dash_{cr['id']}", clear_on_submit=True):
-                                v = st.number_input("Valor a consumir", min_value=0.01,
-                                                    max_value=float(saldo_cr), step=0.01, format="%.2f",
-                                                    key=f"v_cons_{cr['id']}")
                                 resp = st.text_input("Responsável", key=f"resp_{cr['id']}")
                                 if st.form_submit_button("💸 Registrar consumo", use_container_width=True):
-                                    novo_ut = (cr["valor_utilizado"] or 0) + v
-                                    novo_st = "UTILIZADO" if (cr["valor_original"] - novo_ut) <= 0 else "VÁLIDO"
-                                    update_credito(cr["id"], {"valor_utilizado": novo_ut, "status": novo_st})
-                                    insert_movimentacao({"credito_id": cr["id"], "tipo": "UTILIZAÇÃO",
-                                                         "valor": float(v), "data": str(date.today()),
-                                                         "responsavel": resp or None})
-                                    st.success(f"✅ {brl(v)} consumido!")
-                                    _clear_and_rerun()
+                                    if not v or v <= 0:
+                                        st.error("❌ Informe um valor válido antes de registrar.")
+                                    elif v > saldo_cr:
+                                        st.error(f"❌ Valor maior que o saldo disponível ({brl(saldo_cr)}).")
+                                    else:
+                                        novo_ut = (cr["valor_utilizado"] or 0) + v
+                                        novo_st = "UTILIZADO" if (cr["valor_original"] - novo_ut) <= 0 else "VÁLIDO"
+                                        update_credito(cr["id"], {"valor_utilizado": novo_ut, "status": novo_st})
+                                        insert_movimentacao({"credito_id": cr["id"], "tipo": "UTILIZAÇÃO",
+                                                             "valor": float(v), "data": str(date.today()),
+                                                             "responsavel": resp or None})
+                                        st.session_state["_consumo_cli_ok"] = f"✅ {brl(v)} consumido!"
+                                        _clear_and_rerun()
 
         if cli_sub_tab == "📄 Notas Fiscais":
             if notas_cli:
@@ -352,14 +388,20 @@ if main_tab == "🧑‍🤝‍🧑 Clientes":
                 st.caption("Nova NF")
                 n1, n2 = st.columns(2)
                 num_nf   = n1.text_input("Número NF")
-                valor_nf = n2.number_input("Valor (R$)", min_value=0.0, step=0.01, format="%.2f")
+                with n2:
+                    valor_nf, _ = _valor_input("Valor (R$)", key=f"valor_nf_{cli['id']}")
                 data_em  = n1.date_input("Data emissão")
                 auto_cred = n2.checkbox("Criar crédito automaticamente", value=True)
                 venc_nf = None
                 if auto_cred:
-                    venc_nf = st.date_input("Vencimento do crédito")
+                    venc_nf = st.date_input("Vencimento do crédito",
+                                             value=date.today() + timedelta(days=30))
                 if st.form_submit_button("➕ Cadastrar NF", use_container_width=True):
-                    if num_nf.strip():
+                    if not num_nf.strip():
+                        st.error("❌ Informe o número da NF.")
+                    elif valor_nf is None:
+                        st.error("❌ Informe um valor válido para a NF.")
+                    else:
                         nf_id = insert_nota({"numero_nf": num_nf.strip(), "cliente_id": cli["id"],
                                               "data_emissao": str(data_em), "valor_total": float(valor_nf)})
                         if auto_cred and valor_nf > 0:
@@ -492,30 +534,34 @@ if main_tab == "💳 Créditos":
                 cr_edit = opts_edit[sel_edit_label]
                 with st.form(f"form_edit_cred_{cr_edit['id']}"):
                     ce1, ce2 = st.columns(2)
-                    novo_valor = ce1.number_input(
-                        "Valor original (R$)", min_value=0.01, step=0.01, format="%.2f",
-                        value=float(cr_edit.get("valor_original") or 0.01),
-                    )
+                    with ce1:
+                        novo_valor, _ = _valor_input(
+                            "Valor original (R$)", key=f"edit_valor_{cr_edit['id']}",
+                            valor_atual=float(cr_edit.get("valor_original") or 0),
+                        )
                     venc_atual = pd.to_datetime(cr_edit.get("data_vencimento"), errors="coerce")
                     novo_venc = ce2.date_input(
-                        "Vencimento",
+                        "Vencimento", key=f"edit_venc_{cr_edit['id']}",
                         value=venc_atual.date() if pd.notna(venc_atual) else date.today() + timedelta(days=30),
                     )
                     status_opts = ["VÁLIDO", "EXPIRADO", "UTILIZADO", "CANCELADO"]
                     novo_status = st.selectbox(
-                        "Status", status_opts,
+                        "Status", status_opts, key=f"edit_status_{cr_edit['id']}",
                         index=status_opts.index(cr_edit.get("status")) if cr_edit.get("status") in status_opts else 0,
                     )
                     if st.form_submit_button("💾 Salvar alterações", use_container_width=True):
-                        update_credito(cr_edit["id"], {
-                            "valor_original":  float(novo_valor),
-                            "data_vencimento": str(novo_venc),
-                            "status":          novo_status,
-                        })
-                        st.session_state["_edit_cred_ok"] = (
-                            f"✅ Crédito de {cr_edit.get('cliente_nome','?')} atualizado!"
-                        )
-                        _clear_and_rerun()
+                        if novo_valor is None:
+                            st.error("❌ Informe um valor válido antes de salvar.")
+                        else:
+                            update_credito(cr_edit["id"], {
+                                "valor_original":  float(novo_valor),
+                                "data_vencimento": str(novo_venc),
+                                "status":          novo_status,
+                            })
+                            st.session_state["_edit_cred_ok"] = (
+                                f"✅ Crédito de {cr_edit.get('cliente_nome','?')} atualizado!"
+                            )
+                            _clear_and_rerun()
 
             # Expirar crédito individual
             with st.expander("⏰ Expirar um crédito manualmente"):
@@ -560,8 +606,9 @@ if main_tab == "💳 Créditos":
                 st.markdown("##### 2️⃣ Dados do crédito")
                 with st.form("form_novo_cred_dash", clear_on_submit=True):
                     c1, c2 = st.columns(2)
-                    valor  = c1.number_input("Valor (R$) *", min_value=0.0, step=0.01, format="%.2f",
-                                              help="Digite o valor real do crédito antes de cadastrar.")
+                    with c1:
+                        valor, _ = _valor_input("Valor (R$) *", key="valor_novo_cred",
+                                                 help="Digite o valor real do crédito antes de cadastrar.")
                     venc   = c2.date_input("Vencimento *", value=date.today() + timedelta(days=30),
                                             help="Data até quando o crédito vale. Ajuste conforme o combinado com o cliente.")
                     nf_sel = st.selectbox("NF vinculada (opcional)", list(nf_opts.keys()))
@@ -580,7 +627,9 @@ if main_tab == "💳 Créditos":
                         ct_sel = st.selectbox("Contrato vinculado", list(ct_opts.keys()))
 
                     if st.form_submit_button("➕ Cadastrar crédito", use_container_width=True):
-                        if valor < 1:
+                        if valor is None:
+                            st.error("❌ Informe um valor válido antes de cadastrar.")
+                        elif valor < 1:
                             st.error(f"❌ Valor muito baixo ({brl(valor)}). "
                                      f"Confirme se digitou o valor certo antes de cadastrar.")
                         else:
@@ -647,29 +696,31 @@ if main_tab == "💳 Créditos":
 
                 cc, cd, ce = st.columns(3)
                 qtd_am    = cc.number_input("Qtd amostras", min_value=0, step=1, value=0)
-                vl_am     = cd.number_input("Valor / amostra (R$)", min_value=0.0, step=0.01, format="%.2f", value=0.0)
+                with cd:
+                    vl_am, _ = _valor_input("Valor / amostra (R$)", key=f"vl_am_{cr['id']}")
                 data_serv = ce.date_input("Data do serviço", value=date.today())
 
-                total_calc = qtd_am * vl_am if qtd_am > 0 and vl_am > 0 else 0.0
+                total_calc = qtd_am * vl_am if qtd_am > 0 and vl_am else 0.0
                 if total_calc > 0:
                     st.info(f"💡 Total calculado: **{brl(total_calc)}** ({qtd_am} amostras × {brl(vl_am)})")
-                    v_uso_default = min(total_calc, saldo_d)
-                else:
-                    v_uso_default = 0.01
 
                 cf, cg = st.columns(2)
-                v_uso = cf.number_input(
-                    "Valor total consumido (R$) *",
-                    min_value=0.01, max_value=float(saldo_d),
-                    step=0.01, format="%.2f",
-                    value=float(min(v_uso_default, saldo_d)) if v_uso_default > 0 else 0.01,
-                )
+                with cf:
+                    v_uso, _ = _valor_input(
+                        "Valor total consumido (R$) *", key=f"v_uso_{cr['id']}",
+                        valor_atual=min(total_calc, saldo_d) if total_calc > 0 else None,
+                        help=f"Máximo disponível: {brl(saldo_d)}",
+                    )
                 resp  = cg.text_input("Responsável")
                 obs_u = st.text_area("Observação", height=60)
 
                 if st.form_submit_button("💸 Registrar Consumo", use_container_width=True):
                     if not desc_serv.strip():
                         st.error("Informe a descrição do serviço.")
+                    elif not v_uso or v_uso <= 0:
+                        st.error("❌ Informe um valor válido de consumo.")
+                    elif v_uso > saldo_d:
+                        st.error(f"❌ Valor maior que o saldo disponível ({brl(saldo_d)}).")
                     else:
                         novo_ut = (cr["valor_utilizado"] or 0) + v_uso
                         novo_st = "UTILIZADO" if (cr["valor_original"] - novo_ut) <= 0 else "VÁLIDO"
@@ -684,7 +735,7 @@ if main_tab == "💳 Créditos":
                             "descricao_servico": desc_serv.strip(),
                             "codigo_servico":    cod_serv.strip() or None,
                             "qtd_amostras":      int(qtd_am) if qtd_am > 0 else None,
-                            "valor_amostra":     float(vl_am) if vl_am > 0 else None,
+                            "valor_amostra":     float(vl_am) if vl_am and vl_am > 0 else None,
                         })
                         st.session_state["_consumo_ok"] = f"✅ Consumo de {brl(v_uso)} registrado!"
                         _clear_and_rerun()
