@@ -112,6 +112,12 @@ def insert_movimentacao(data) -> int:
     r = _sb().table("movimentacoes").insert(data).execute()
     return r.data[0]["id"]
 
+def get_movimentacao(id):
+    return _sb().table("movimentacoes").select("*").eq("id", id).single().execute().data
+
+def delete_movimentacao(id):
+    _sb().table("movimentacoes").delete().eq("id", id).execute()
+
 # ── Resumo por cliente ────────────────────────────────────────────────────────
 def resumo_cliente(cliente_id) -> dict:
     creds = list_creditos(cliente_id=cliente_id)

@@ -214,6 +214,15 @@ def insert_movimentacao(data: dict) -> int:
         )
         return cur.lastrowid
 
+def get_movimentacao(id):
+    with _conn() as conn:
+        row = conn.execute("SELECT * FROM movimentacoes WHERE id=?", (id,)).fetchone()
+    return dict(row) if row else None
+
+def delete_movimentacao(id):
+    with _conn() as conn:
+        conn.execute("DELETE FROM movimentacoes WHERE id=?", (id,))
+
 # ── Resumo por cliente ────────────────────────────────────────────────────────
 def resumo_cliente(cliente_id: int) -> dict:
     with _conn() as conn:

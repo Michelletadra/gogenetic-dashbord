@@ -47,3 +47,5 @@ def delete_credito(*a, **kw):      return _backend_mod().delete_credito(*a, **kw
 
 def list_movimentacoes(*a, **kw):  return _backend_mod().list_movimentacoes(*a, **kw)
 def insert_movimentacao(*a, **kw): return _backend_mod().insert_movimentacao(*a, **kw)
+def get_movimentacao(*a, **kw):    return _backend_mod().get_movimentacao(*a, **kw)
+def delete_movimentacao(*a, **kw): return _backend_mod().delete_movimentacao(*a, **kw)

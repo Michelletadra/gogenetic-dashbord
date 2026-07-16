@@ -15,7 +15,7 @@ from db_creditos import (
     list_clientes, insert_cliente, update_cliente, delete_cliente,
     list_notas, insert_nota, delete_nota,
     list_creditos, insert_credito, update_credito, delete_credito,
-    list_movimentacoes, insert_movimentacao,
+    list_movimentacoes, insert_movimentacao, delete_movimentacao,
 )
 
 st.set_page_config(page_title="Créditos | GoGenetic", page_icon="💳", layout="wide")
@@ -745,6 +745,9 @@ if main_tab == "💳 Créditos":
 # ══════════════════════════════════════════════════════════════════════════════
 if main_tab == "📋 Movimentações":
     import io
+    if st.session_state.get("_del_mov_ok"):
+        st.success(st.session_state.pop("_del_mov_ok"))
+
     cli_opts = {c["nome"]: c["id"] for c in clientes_all}
 
     col1, col2, col3 = st.columns(3)
@@ -796,6 +799,27 @@ if main_tab == "📋 Movimentações":
                                file_name="movimentacoes.xlsx",
                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                key="dl_movs")
+
+        with st.expander("🗑️ Apagar uma movimentação errada"):
+            movs_no_filtro = df_m.to_dict("records")
+            opts_del = {
+                f"{(m.get('data').strftime('%d/%m/%Y') if pd.notna(m.get('data')) else '—')} — "
+                f"{m.get('cliente_nome','?')} — {m.get('descricao_servico') or m.get('tipo','')} — "
+                f"{brl(m.get('valor'))} (#{m['id']})": m
+                for m in movs_no_filtro
+            }
+            sel_del_label = st.selectbox("Movimentação:", list(opts_del.keys()), key="sel_del_mov")
+            mov_del = opts_del[sel_del_label]
+            st.caption("Isso também devolve o valor pro saldo do crédito (desfaz o consumo).")
+            if st.button("🗑️ Confirmar exclusão", key="btn_del_mov"):
+                cred = next((c for c in creditos_all if c["id"] == mov_del.get("credito_id")), None)
+                if cred and mov_del.get("tipo") in ("UTILIZAÇÃO", "USO"):
+                    novo_ut = max(0, (cred.get("valor_utilizado") or 0) - (mov_del.get("valor") or 0))
+                    novo_st = "VÁLIDO" if novo_ut < (cred.get("valor_original") or 0) else cred.get("status")
+                    update_credito(cred["id"], {"valor_utilizado": novo_ut, "status": novo_st})
+                delete_movimentacao(mov_del["id"])
+                st.session_state["_del_mov_ok"] = "✅ Movimentação apagada e saldo do crédito corrigido."
+                _clear_and_rerun()
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 5 — RELATÓRIO MENSAL
