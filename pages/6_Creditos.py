@@ -484,7 +484,8 @@ if main_tab == "💳 Créditos":
             # Editar um crédito existente (valor, vencimento, status)
             with st.expander("✏️ Editar um crédito"):
                 opts_edit = {
-                    f"{cr.get('cliente_nome','?')} — {_nf_label(cr.get('numero_nf'))} — {brl(cr.get('valor_original'))}": cr
+                    f"{cr.get('cliente_nome','?')} — {_nf_label(cr.get('numero_nf'))} — "
+                    f"{brl(cr.get('valor_original'))} (#{cr['id']})": cr
                     for cr in creds_tab
                 }
                 sel_edit_label = st.selectbox("Crédito:", list(opts_edit.keys()), key="sel_edit_cred")
@@ -521,7 +522,7 @@ if main_tab == "💳 Créditos":
                 validos_tab = [cr for cr in creds_tab if cr["status"] == "VÁLIDO"]
                 if validos_tab:
                     opts_exp = {
-                        f"{cr.get('cliente_nome','?')} — {_nf_label(cr.get('numero_nf'))}": cr["id"]
+                        f"{cr.get('cliente_nome','?')} — {_nf_label(cr.get('numero_nf'))} (#{cr['id']})": cr["id"]
                         for cr in validos_tab
                     }
                     sel_exp = st.selectbox("Crédito:", list(opts_exp.keys()), key="sel_exp")
@@ -615,20 +616,29 @@ if main_tab == "💳 Créditos":
                                     st.error(f"❌ Não foi possível cadastrar o crédito: {e}")
 
     if cred_action == "💸 Registrar Consumo":
+        if st.session_state.get("_consumo_ok"):
+            st.success(st.session_state.pop("_consumo_ok"))
+
         creds_validos = [c for c in creditos_all if c["status"] == "VÁLIDO"]
         if not creds_validos:
             st.info("Nenhum crédito válido disponível.")
         else:
+            # Rótulo inclui o id pra nunca colidir entre créditos "iguais"
+            # (mesmo cliente, mesma NF, mesmo saldo) — já vi isso acontecer.
             opts = {
-                f"{c.get('cliente_nome','?')} — {_nf_label(c.get('numero_nf'))} — Saldo: {brl((c['valor_original'] or 0)-(c['valor_utilizado'] or 0))}": c
+                f"{c.get('cliente_nome','?')} — {_nf_label(c.get('numero_nf'))} — "
+                f"Saldo: {brl((c['valor_original'] or 0)-(c['valor_utilizado'] or 0))} (#{c['id']})": c
                 for c in creds_validos
             }
-            with st.form("form_consumo_dash", clear_on_submit=True):
-                label   = st.selectbox("Crédito *", list(opts.keys()))
-                cr      = opts[label]
-                saldo_d = (cr["valor_original"] or 0) - (cr["valor_utilizado"] or 0)
+            # Fora do form: selecionar outro crédito atualiza o saldo na hora,
+            # em vez de só mudar depois de enviar (o que já causou confusão de
+            # "saldo não bate" — a tela ficava mostrando o crédito anterior).
+            label   = st.selectbox("Crédito *", list(opts.keys()), key="consumo_cred_sel")
+            cr      = opts[label]
+            saldo_d = (cr["valor_original"] or 0) - (cr["valor_utilizado"] or 0)
+            st.markdown(f"**Saldo disponível: {brl(saldo_d)}**")
 
-                st.markdown(f"**Saldo disponível: {brl(saldo_d)}**")
+            with st.form(f"form_consumo_dash_{cr['id']}", clear_on_submit=True):
                 st.markdown("---")
 
                 ca, cb = st.columns(2)
@@ -676,7 +686,7 @@ if main_tab == "💳 Créditos":
                             "qtd_amostras":      int(qtd_am) if qtd_am > 0 else None,
                             "valor_amostra":     float(vl_am) if vl_am > 0 else None,
                         })
-                        st.success(f"✅ Consumo de {brl(v_uso)} registrado!")
+                        st.session_state["_consumo_ok"] = f"✅ Consumo de {brl(v_uso)} registrado!"
                         _clear_and_rerun()
 
 # ══════════════════════════════════════════════════════════════════════════════
