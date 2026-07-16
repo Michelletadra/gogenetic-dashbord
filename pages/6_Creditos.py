@@ -438,6 +438,9 @@ if main_tab == "💳 Créditos":
     )
 
     if cred_action == "📋 Lista":
+        if st.session_state.get("_edit_cred_ok"):
+            st.success(st.session_state.pop("_edit_cred_ok"))
+
         # Filter in memory
         creds_tab = creditos_all
         if status_sel:
@@ -477,6 +480,41 @@ if main_tab == "💳 Créditos":
             for col_brl in ["Original","Utilizado","Saldo"]:
                 df_creds_show[col_brl] = df_creds_show[col_brl].apply(brl)
             st.dataframe(df_creds_show, use_container_width=True, hide_index=True)
+
+            # Editar um crédito existente (valor, vencimento, status)
+            with st.expander("✏️ Editar um crédito"):
+                opts_edit = {
+                    f"{cr.get('cliente_nome','?')} — {_nf_label(cr.get('numero_nf'))} — {brl(cr.get('valor_original'))}": cr
+                    for cr in creds_tab
+                }
+                sel_edit_label = st.selectbox("Crédito:", list(opts_edit.keys()), key="sel_edit_cred")
+                cr_edit = opts_edit[sel_edit_label]
+                with st.form(f"form_edit_cred_{cr_edit['id']}"):
+                    ce1, ce2 = st.columns(2)
+                    novo_valor = ce1.number_input(
+                        "Valor original (R$)", min_value=0.01, step=0.01, format="%.2f",
+                        value=float(cr_edit.get("valor_original") or 0.01),
+                    )
+                    venc_atual = pd.to_datetime(cr_edit.get("data_vencimento"), errors="coerce")
+                    novo_venc = ce2.date_input(
+                        "Vencimento",
+                        value=venc_atual.date() if pd.notna(venc_atual) else date.today() + timedelta(days=30),
+                    )
+                    status_opts = ["VÁLIDO", "EXPIRADO", "UTILIZADO", "CANCELADO"]
+                    novo_status = st.selectbox(
+                        "Status", status_opts,
+                        index=status_opts.index(cr_edit.get("status")) if cr_edit.get("status") in status_opts else 0,
+                    )
+                    if st.form_submit_button("💾 Salvar alterações", use_container_width=True):
+                        update_credito(cr_edit["id"], {
+                            "valor_original":  float(novo_valor),
+                            "data_vencimento": str(novo_venc),
+                            "status":          novo_status,
+                        })
+                        st.session_state["_edit_cred_ok"] = (
+                            f"✅ Crédito de {cr_edit.get('cliente_nome','?')} atualizado!"
+                        )
+                        _clear_and_rerun()
 
             # Expirar crédito individual
             with st.expander("⏰ Expirar um crédito manualmente"):
