@@ -1,16 +1,30 @@
 """Página 3 — Contas a Pagar e a Receber."""
 import io
+import re
 import streamlit as st
 import pandas as pd
 import plotly.express as px
 from datetime import date, timedelta
-from utils import (GLOBAL_CSS, BRAND, NOMES, CHART_COLORS,
+from utils import (GLOBAL_CSS, BRAND, NOMES, NOME_YOU, CHART_COLORS,
                    brl, soma, kpi_card, plotly_layout, sidebar_header,
                    load_company_data, load_vencidas,
                    get_empresas_disponiveis, load_data_unificado,
                    load_vencidas_unificado,
                    load_companies_data, load_companies_vencidas,
                    tabela_marcavel)
+
+def _parse_recebimento_desc(descricao: str) -> dict:
+    """Extrai NF, código do serviço/venda e parcela do texto que o eGestor
+    devolve em 'descricao', ex: 'NFSe 295 Venda a prazo, código 8673, parcela 1/1'."""
+    descricao = descricao or ""
+    nf      = re.search(r"NFS?e?\s*(\d+)", descricao, re.IGNORECASE)
+    codigo  = re.search(r"c[oó]digo\s*,?\s*(\d+)", descricao, re.IGNORECASE)
+    parcela = re.search(r"parcela\s*(\d+/\d+)", descricao, re.IGNORECASE)
+    return {
+        "NF":       nf.group(1) if nf else "—",
+        "Servico":  codigo.group(1) if codigo else "—",
+        "Parcela":  parcela.group(1) if parcela else "—",
+    }
 
 st.set_page_config(page_title="Contas | GoGenetic", page_icon="💳", layout="wide")
 st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
@@ -85,6 +99,7 @@ with st.spinner("Carregando contas..."):
 
     contas_rec, contas_pag = [], []
     venc_rec,   venc_pag   = [], []
+    recebidos = []
     for nome in empresas_ativas:
         dados = _dados_map[nome]
         for item in dados["contas_receber"]: contas_rec.append({**item, "empresa": nome})
@@ -92,6 +107,13 @@ with st.spinner("Carregando contas..."):
         v = _venc_map[nome]
         for item in v["receber"]: venc_rec.append({**item, "empresa": nome})
         for item in v["pagar"]:   venc_pag.append({**item, "empresa": nome})
+        # "Recebido" (dinheiro que já entrou) só existe nesse formato pras
+        # empresas do eGestor — GoGenetic You (Bling) usa outro esquema de dados.
+        if nome != NOME_YOU:
+            for item in dados["faturamento"]:
+                recebidos.append({**item, **_parse_recebimento_desc(item.get("descricao")), "empresa": nome})
+
+total_receb = soma(recebidos, "valor")
 
 total_rec = soma(contas_rec, "valor")
 total_pag = soma(contas_pag, "valor")
@@ -178,10 +200,11 @@ st.markdown("<div class='section-title'>Detalhamento — selecione linhas para s
             unsafe_allow_html=True)
 st.caption("💡 Clique nas linhas para selecioná-las. O total e o botão de exportação aparecem abaixo.")
 
-tab_rec, tab_pag, tab_venc = st.tabs([
+tab_rec, tab_pag, tab_venc, tab_recebido = st.tabs([
     f"📥 A Receber ({len(contas_rec)})",
     f"📤 A Pagar ({len(contas_pag)})",
     f"⚠️ Vencidos ({len(venc_rec) + len(venc_pag)})",
+    f"✅ Recebido ({len(recebidos)})",
 ])
 
 
@@ -273,6 +296,17 @@ with tab_rec:
         {"empresa": "Empresa", "dtVenc": "Vencimento", "nomeContato": "Cliente",
          "valor": "Valor", "descricao": "Descrição"},
         nome_arquivo="a_receber",
+    )
+
+with tab_recebido:
+    st.caption("Dinheiro que já entrou no período (data do pagamento) · "
+               "NF e nº do serviço extraídos automaticamente. GoGenetic You (Bling) "
+               "não entra aqui — usa outro formato de dados.")
+    tabela_interativa(
+        recebidos,
+        {"empresa": "Empresa", "dtPgto": "Data Pgto", "nomeContato": "Cliente",
+         "NF": "NF", "Servico": "Serviço", "Parcela": "Parcela", "valor": "Valor"},
+        nome_arquivo="recebido",
     )
 
 with tab_pag:
