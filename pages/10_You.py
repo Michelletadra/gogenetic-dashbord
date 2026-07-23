@@ -309,6 +309,25 @@ with tab_asaas:
             plotly_layout(fig)
             st.plotly_chart(fig, use_container_width=True)
 
+            st.markdown("**Recebidos no período**")
+            df_recebidos_show = df_rec[["dtPgto", "nomeContato", "descricao", "valor", "situacao", "metodo"]].copy()
+            df_recebidos_show = df_recebidos_show.sort_values("dtPgto")
+            df_recebidos_show["dtPgto"] = df_recebidos_show["dtPgto"].dt.strftime("%d/%m/%Y")
+            df_recebidos_show["valor"] = df_recebidos_show["valor"].apply(brl)
+            df_recebidos_show.columns = ["Data Pgto", "Cliente", "Descrição", "Valor", "Situação", "Método"]
+            st.dataframe(df_recebidos_show, use_container_width=True, hide_index=True)
+
+            buf_recebidos = io.BytesIO()
+            with pd.ExcelWriter(buf_recebidos, engine="openpyxl") as writer:
+                df_recebidos_show.to_excel(writer, index=False, sheet_name="Recebidos Asaas")
+            st.download_button("📥 Exportar Recebidos (Excel)", data=buf_recebidos.getvalue(),
+                                file_name=f"asaas_recebidos_{date.today().strftime('%Y%m%d')}.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                key="dl_asaas_recebidos")
+        else:
+            st.info("Nenhum recebimento no período.")
+
+        st.markdown("---")
         st.markdown("**Contas a receber**")
         if not receber:
             st.info("Nenhuma cobrança com vencimento no período.")
