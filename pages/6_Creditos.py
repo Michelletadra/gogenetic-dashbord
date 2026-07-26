@@ -576,6 +576,27 @@ if main_tab == "💳 Créditos":
                             )
                             _clear_and_rerun()
 
+                st.markdown("---")
+                movs_do_credito = [m for m in movs_all if m.get("credito_id") == cr_edit["id"]]
+                if movs_do_credito:
+                    st.warning(
+                        f"⚠️ Este crédito tem {len(movs_do_credito)} movimentação(ões) registrada(s). "
+                        f"Excluir apaga esse histórico de uso junto — normalmente é mais seguro "
+                        f"editar o valor/status acima do que excluir. Se ainda assim quiser apagar, "
+                        f"apague antes as movimentações (aba Movimentações) ou confirme abaixo."
+                    )
+                confirma_excluir = st.checkbox(
+                    "Confirmo que quero excluir este crédito permanentemente",
+                    key=f"confirma_del_cred_{cr_edit['id']}",
+                )
+                if st.button("🗑️ Excluir crédito", key=f"btn_del_cred_{cr_edit['id']}",
+                             disabled=not confirma_excluir):
+                    delete_credito(cr_edit["id"])
+                    st.session_state["_edit_cred_ok"] = (
+                        f"🗑️ Crédito de {cr_edit.get('cliente_nome','?')} excluído."
+                    )
+                    _clear_and_rerun()
+
             # Expirar crédito individual
             with st.expander("⏰ Expirar um crédito manualmente"):
                 validos_tab = [cr for cr in creds_tab if cr["status"] == "VÁLIDO"]
