@@ -261,7 +261,7 @@ else:
                        else df_base["situacaoOS"] == status]
         return df_f.sort_values("dtVenda_sort", ascending=asc)
 
-    df_exec      = _filtro("Em execução",              asc=True)
+    df_exec      = _filtro("Em execução", asc=True).sort_values("Entrega_dt", ascending=True, na_position="last")
     df_aprov     = _filtro("Aprovado",                 asc=False)
     df_faturar   = _filtro("Faturar",                  asc=False)
     df_invoice   = _filtro("Invoice",                  asc=False)
@@ -443,7 +443,7 @@ else:
             "codigo":            "Cód.",
             "dtVenda":           "Data",
             "Dias em execução":  "Dias",
-            "Entrega":           "Entrega",
+            "Entrega_dt":        "Entrega",
             "Cód. S":            "Cód. S",
             "nomeContato":       "Cliente",
             "nomeVendedor":      "Vendedor",
@@ -476,7 +476,7 @@ else:
                 key="execucao",
                 column_config={
                     "Dias":        st.column_config.NumberColumn("Dias", width="small"),
-                    "Entrega":     st.column_config.TextColumn("Entrega", width="small"),
+                    "Entrega":     st.column_config.DateColumn("Entrega", format="DD/MM/YYYY", width="small"),
                     "Cód. S":      st.column_config.TextColumn("Cód. S", width="small"),
                     "Situação OS": st.column_config.TextColumn("Situação OS", width="medium"),
                     "Cliente":     st.column_config.TextColumn("Cliente", width="large"),
