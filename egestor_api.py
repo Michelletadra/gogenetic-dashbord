@@ -116,7 +116,7 @@ class EgestorClient:
             "dtTipo": "dtVenc",
             "dtIni": dt_ini,
             "dtFim": dt_fim,
-            "fields": "codigo,descricao,valor,dtVenc,nomeContato,situacao,origem",
+            "fields": "codigo,descricao,valor,dtVenc,nomeContato,situacao,origem,codPlanoContas",
         })
 
     def get_vencidas_receber(self) -> list:
@@ -138,7 +138,7 @@ class EgestorClient:
             "dtTipo": "dtVenc",
             "dtIni": "2020-01-01",
             "dtFim": ontem,
-            "fields": "codigo,descricao,valor,dtVenc,nomeContato,situacao",
+            "fields": "codigo,descricao,valor,dtVenc,nomeContato,situacao,codPlanoContas",
         })
 
     def get_servicos(self, dt_ini: str, dt_fim: str) -> list:

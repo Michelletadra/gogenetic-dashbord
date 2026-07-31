@@ -123,15 +123,18 @@ class BlingClient:
 
     @staticmethod
     def normaliza_conta(item: dict) -> dict:
-        contato = item.get("contato") or {}
+        contato   = item.get("contato") or {}
+        categoria = item.get("categoria")
+        cat_id    = categoria.get("id") if isinstance(categoria, dict) else categoria
         return {
-            "codigo":      item.get("id", ""),
-            "descricao":   item.get("descricao") or item.get("historico", ""),
-            "valor":       item.get("valor", 0),
-            "dtVenc":      item.get("vencimento") or item.get("dataVencimento", ""),
-            "dtPgto":      item.get("dataPagamento", ""),
-            "nomeContato": contato.get("nome", "") if isinstance(contato, dict) else "",
-            "situacao":    BlingClient._situacao_id(item.get("situacao")),
+            "codigo":         item.get("id", ""),
+            "descricao":      item.get("descricao") or item.get("historico", ""),
+            "valor":          item.get("valor", 0),
+            "dtVenc":         item.get("vencimento") or item.get("dataVencimento", ""),
+            "dtPgto":         item.get("dataPagamento", ""),
+            "nomeContato":    contato.get("nome", "") if isinstance(contato, dict) else "",
+            "situacao":       BlingClient._situacao_id(item.get("situacao")),
+            "codPlanoContas": cat_id,
         }
 
     @staticmethod
