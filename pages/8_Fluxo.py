@@ -7,7 +7,6 @@ from pathlib import Path
 import openpyxl
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 import streamlit as st
 
 from utils import (GLOBAL_CSS, BRAND, brl, soma, kpi_card, plotly_layout,
@@ -231,69 +230,6 @@ def prep_items(items: list, tipo: str) -> pd.DataFrame:
     return df
 
 df_rec  = prep_items(rec_items,  "A Receber")
-df_pag  = prep_items(pag_items,  "A Pagar")
-df_vr   = prep_items(venc_rec,   "Vencido Rec.")
-df_vp   = prep_items(venc_pag,   "Vencido Pag.")
-
-# ── Gráfico Semanal ────────────────────────────────────────────────────────────
-st.markdown("<div class='section-title'>Fluxo Semanal</div>", unsafe_allow_html=True)
-
-frames = []
-if not df_rec.empty:  frames.append(df_rec.assign(sinal= 1))
-if not df_vr.empty:   frames.append(df_vr.assign(sinal= 1))
-if incluir_pagar:
-    if not df_pag.empty:  frames.append(df_pag.assign(sinal=-1))
-    if not df_vp.empty:   frames.append(df_vp.assign(sinal=-1))
-
-if frames:
-    df_all = pd.concat(frames, ignore_index=True)
-    df_all["valor_sig"] = df_all["valor"] * df_all["sinal"]
-
-    # Agrupado por semana e tipo
-    df_sem = (df_all.groupby(["semana", "tipo"])["valor"]
-              .sum().reset_index()
-              .sort_values("semana"))
-
-    cor_map = {
-        "A Receber":    "#10B981",
-        "Vencido Rec.": "#F59E0B",
-        "A Pagar":      "#EF4444",
-        "Vencido Pag.": "#7F1D1D",
-    }
-
-    fig = px.bar(
-        df_sem, x="semana", y="valor", color="tipo",
-        barmode="group",
-        color_discrete_map=cor_map,
-        labels={"semana": "", "valor": "R$", "tipo": ""},
-    )
-
-    # Linha de saldo acumulado líquido
-    df_liq = (df_all.groupby("semana")["valor_sig"]
-              .sum().reset_index()
-              .sort_values("semana"))
-    df_liq["acumulado"] = df_liq["valor_sig"].cumsum()
-
-    fig.add_trace(go.Scatter(
-        x=df_liq["semana"],
-        y=df_liq["acumulado"],
-        name="Saldo Acumulado",
-        mode="lines+markers",
-        line=dict(color="#7E16B8", width=2.5, dash="dot"),
-        marker=dict(size=6),
-        yaxis="y2",
-    ))
-    fig.update_layout(
-        yaxis2=dict(
-            overlaying="y", side="right",
-            showgrid=False,
-            tickfont=dict(color="#7E16B8", size=10),
-            title=dict(text="Saldo Acum.", font=dict(color="#7E16B8", size=10)),
-        )
-    )
-    plotly_layout(fig)
-    fig.update_layout(height=380)
-    st.plotly_chart(fig, use_container_width=True)
 
 # ── Gráfico por Empresa ────────────────────────────────────────────────────────
 if len(empresas_ativas) > 1 and not df_rec.empty:
