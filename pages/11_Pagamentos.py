@@ -192,8 +192,6 @@ saldo_total_reservado  = sum(s["reservado"] for s in saldo_por_conta.values())
 total_selecionado      = float(df.loc[df["Selecionar"], "Valor Final"].sum()) if not df.empty else 0.0
 saldo_projetado_total  = saldo_total_disponivel - total_selecionado
 
-total_pendente = float(df["Valor Final"].sum()) if not df.empty else 0.0
-total_vencido  = float(df.loc[df["_vencido"], "Valor Final"].sum()) if not df.empty else 0.0
 vence_hoje = float(df.loc[df["_dias"] == 0, "Valor Final"].sum()) if not df.empty else 0.0
 vence_7    = float(df.loc[(df["_dias"] >= 0) & (df["_dias"] <= 7), "Valor Final"].sum()) if not df.empty else 0.0
 vence_15   = float(df.loc[(df["_dias"] >= 0) & (df["_dias"] <= 15), "Valor Final"].sum()) if not df.empty else 0.0
@@ -201,14 +199,12 @@ vence_30   = float(df.loc[(df["_dias"] >= 0) & (df["_dias"] <= 30), "Valor Final
 
 # ── 1. RESUMO FINANCEIRO SUPERIOR ──────────────────────────────────────────────
 st.markdown("<div class='section-title'>Resumo Financeiro</div>", unsafe_allow_html=True)
-c1, c2, c3, c4, c5 = st.columns(5)
+c1, c2, c3 = st.columns(3)
 kpi_card(c1, "🏦", "Saldo Disponível", brl(saldo_total_disponivel), f"Reservado: {brl(saldo_total_reservado)}", border="rgba(36,183,140,0.3)")
 kpi_card(c2, "✅", "Selecionado p/ Pagar", brl(total_selecionado), f"{int(df['Selecionar'].sum()) if not df.empty else 0} título(s)", border="rgba(126,22,184,0.3)")
 kpi_card(c3, "📊", "Saldo Projetado", brl(saldo_projetado_total), "Disponível − Selecionado",
          border="rgba(239,68,68,0.4)" if saldo_projetado_total < 0 else "rgba(36,183,140,0.4)",
          value_class="kpi-negative" if saldo_projetado_total < 0 else "kpi-positive")
-kpi_card(c4, "📋", "Total Pendente", brl(total_pendente), f"{len(df)} título(s)", border="rgba(126,22,184,0.2)")
-kpi_card(c5, "🚨", "Total Vencido", brl(total_vencido), f"{int(df['_vencido'].sum()) if not df.empty else 0} título(s)", border="rgba(239,68,68,0.4)", value_class="kpi-negative" if total_vencido > 0 else "")
 
 c6, c7, c8, c9, c10 = st.columns(5)
 kpi_card(c6, "📅", "Vence Hoje", brl(vence_hoje), "", border="rgba(255,103,47,0.4)")
