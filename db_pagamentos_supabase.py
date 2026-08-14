@@ -34,9 +34,9 @@ def list_contas_bancarias(somente_ativas: bool = True) -> list:
     return q.execute().data
 
 
-def insert_conta_bancaria(nome: str, banco: str = "", saldo_minimo: float = 0) -> int:
+def insert_conta_bancaria(nome: str, banco: str = "", saldo_minimo: float = 0, limite_credito: float = 0) -> int:
     r = _sb().table("contas_bancarias").insert({
-        "nome": nome, "banco": banco, "saldo_minimo": saldo_minimo,
+        "nome": nome, "banco": banco, "saldo_minimo": saldo_minimo, "limite_credito": limite_credito,
     }).execute()
     return r.data[0]["id"]
 

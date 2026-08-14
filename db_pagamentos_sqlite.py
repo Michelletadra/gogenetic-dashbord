@@ -18,12 +18,13 @@ def init_db():
     with _conn() as conn:
         conn.executescript("""
         CREATE TABLE IF NOT EXISTS contas_bancarias (
-            id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            nome         TEXT NOT NULL,
-            banco        TEXT,
-            saldo_minimo REAL DEFAULT 0,
-            ativo        INTEGER DEFAULT 1,
-            criado_em    TEXT DEFAULT (datetime('now','localtime'))
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome           TEXT NOT NULL,
+            banco          TEXT,
+            saldo_minimo   REAL DEFAULT 0,
+            limite_credito REAL DEFAULT 0,
+            ativo          INTEGER DEFAULT 1,
+            criado_em      TEXT DEFAULT (datetime('now','localtime'))
         );
 
         CREATE TABLE IF NOT EXISTS saldos_bancarios (
@@ -82,6 +83,10 @@ def init_db():
             observacao     TEXT
         );
         """)
+        try:
+            conn.execute("ALTER TABLE contas_bancarias ADD COLUMN limite_credito REAL DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass
 
 
 init_db()
@@ -102,11 +107,11 @@ def list_contas_bancarias(somente_ativas: bool = True) -> list:
         return [_row(r) for r in conn.execute(sql).fetchall()]
 
 
-def insert_conta_bancaria(nome: str, banco: str = "", saldo_minimo: float = 0) -> int:
+def insert_conta_bancaria(nome: str, banco: str = "", saldo_minimo: float = 0, limite_credito: float = 0) -> int:
     with _conn() as conn:
         cur = conn.execute(
-            "INSERT INTO contas_bancarias (nome, banco, saldo_minimo) VALUES (?,?,?)",
-            (nome, banco, saldo_minimo),
+            "INSERT INTO contas_bancarias (nome, banco, saldo_minimo, limite_credito) VALUES (?,?,?,?)",
+            (nome, banco, saldo_minimo, limite_credito),
         )
         return cur.lastrowid
 

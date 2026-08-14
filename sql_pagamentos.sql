@@ -2,13 +2,15 @@
 -- e histórico/auditoria. Rodar uma vez no Supabase SQL Editor.
 
 create table if not exists contas_bancarias (
-  id            bigint generated always as identity primary key,
-  nome          text not null,
-  banco         text,
-  saldo_minimo  numeric default 0,
-  ativo         boolean default true,
-  criado_em     timestamptz default now()
+  id             bigint generated always as identity primary key,
+  nome           text not null,
+  banco          text,
+  saldo_minimo   numeric default 0,
+  limite_credito numeric default 0,
+  ativo          boolean default true,
+  criado_em      timestamptz default now()
 );
+alter table contas_bancarias add column if not exists limite_credito numeric default 0;
 
 -- Histórico de saldos — nunca sobrescrever, sempre inserir novo registro.
 create table if not exists saldos_bancarios (

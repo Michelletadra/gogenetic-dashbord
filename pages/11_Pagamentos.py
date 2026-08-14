@@ -166,10 +166,12 @@ def saldo_info(conta_id):
     """Retorna dict com valor, reservado, disponível e status de atualização."""
     s = saldos_latest.get(conta_id)
     if not s:
-        return {"valor": 0.0, "reservado": 0.0, "disponivel": 0.0,
+        limite = float(conta_por_id.get(conta_id, {}).get("limite_credito") or 0)
+        return {"valor": 0.0, "reservado": 0.0, "limite": limite, "disponivel": limite,
                 "data_ref": None, "cor": "🔴", "legenda": "Sem saldo informado"}
     valor      = float(s["valor"] or 0)
     reservado  = float(s["saldo_reservado"] or 0)
+    limite     = float(conta_por_id.get(conta_id, {}).get("limite_credito") or 0)
     data_ref   = pd.to_datetime(s["data_referencia"]).date()
     dias_uteis = int(np.busday_count(data_ref, hoje)) if data_ref <= hoje else 0
     if data_ref == hoje:
@@ -178,7 +180,8 @@ def saldo_info(conta_id):
         cor, legenda = "🟡", f"Herdado do dia anterior ({data_ref.strftime('%d/%m/%Y')})"
     else:
         cor, legenda = "🔴", f"Saldo não confirmado hoje — usando saldo do dia {data_ref.strftime('%d/%m/%Y')} ({dias_uteis} dias úteis)"
-    return {"valor": valor, "reservado": reservado, "disponivel": valor - reservado,
+    return {"valor": valor, "reservado": reservado, "limite": limite,
+            "disponivel": valor - reservado + limite,
             "data_ref": data_ref, "cor": cor, "legenda": legenda}
 
 
@@ -230,6 +233,7 @@ else:
         quadro_rows.append({
             "": s["cor"], "Conta": c["nome"], "Banco": c.get("banco") or "",
             "Saldo Atual": brl(s["valor"]), "Saldo Reservado": brl(s["reservado"]),
+            "Limite Crédito": brl(s["limite"]),
             "Saldo Disponível": brl(s["disponivel"]),
             "Pagamentos Selecionados": brl(selecionado_conta),
             "Saldo Projetado": brl(projetado), "_projetado_num": projetado,
@@ -273,14 +277,34 @@ with st.expander("✏️ Atualizar saldo de uma conta"):
             df_hist.columns = ["Data Ref.", "Valor", "Reservado", "Usuário", "Observação", "Lançado em"]
             st.dataframe(df_hist, use_container_width=True, hide_index=True)
 
+with st.expander("✏️ Editar limites de uma conta"):
+    if contas_bancarias:
+        conta_lim = st.selectbox("Conta", contas_bancarias, format_func=lambda c: c["nome"], key="pgto_conta_limite")
+        cl1, cl2, cl3 = st.columns(3)
+        banco_edit   = cl1.text_input("Banco", value=conta_lim.get("banco") or "", key="pgto_edit_banco")
+        minimo_edit  = cl2.number_input("Saldo mínimo desejado (R$)", value=float(conta_lim.get("saldo_minimo") or 0),
+                                         step=100.0, key="pgto_edit_minimo")
+        limite_edit  = cl3.number_input("Limite de crédito / cheque especial (R$)", value=float(conta_lim.get("limite_credito") or 0),
+                                         step=100.0, min_value=0.0, key="pgto_edit_limite")
+        if st.button("💾 Salvar limites", key="pgto_btn_editar_limites"):
+            db.update_conta_bancaria(conta_lim["id"], {
+                "banco": banco_edit.strip(), "saldo_minimo": minimo_edit, "limite_credito": limite_edit,
+            })
+            st.success(f"Limites de '{conta_lim['nome']}' atualizados.")
+            st.rerun()
+    else:
+        st.caption("Cadastre uma conta primeiro.")
+
 with st.expander("➕ Cadastrar nova conta bancária"):
-    nc1, nc2, nc3 = st.columns(3)
+    nc1, nc2, nc3, nc4 = st.columns(4)
     nome_nova  = nc1.text_input("Nome da conta", placeholder="Ex: Itaú CC 12345", key="pgto_nova_conta_nome")
     banco_novo = nc2.text_input("Banco", placeholder="Ex: Itaú", key="pgto_nova_conta_banco")
     minimo_novo = nc3.number_input("Saldo mínimo desejado (R$)", value=0.0, step=100.0, key="pgto_nova_conta_min")
+    limite_novo = nc4.number_input("Limite de crédito / cheque especial (R$)", value=0.0, step=100.0,
+                                    min_value=0.0, key="pgto_nova_conta_limite")
     if st.button("➕ Cadastrar conta", key="pgto_btn_nova_conta"):
         if nome_nova.strip():
-            db.insert_conta_bancaria(nome_nova.strip(), banco_novo.strip(), minimo_novo)
+            db.insert_conta_bancaria(nome_nova.strip(), banco_novo.strip(), minimo_novo, limite_novo)
             st.success(f"Conta '{nome_nova}' cadastrada.")
             st.rerun()
         else:
