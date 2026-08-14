@@ -259,7 +259,7 @@ else:
 
 with st.expander("✏️ Atualizar saldo de uma conta"):
     if contas_bancarias:
-        conta_edit = st.selectbox("Conta", contas_bancarias, format_func=lambda c: c["nome"], key="pgto_conta_edit")
+        conta_edit = st.selectbox("Conta", contas_bancarias, format_func=lambda c: f"{c['nome']} — {c['banco']}" if c.get("banco") else c["nome"], key="pgto_conta_edit")
         atual = saldo_por_conta.get(conta_edit["id"], {}) if conta_edit else {}
         ce1, ce2, ce3 = st.columns(3)
         novo_valor      = ce1.number_input("Saldo atual (R$)", value=float(atual.get("valor", 0.0)), step=100.0, key="pgto_novo_saldo")
@@ -279,7 +279,7 @@ with st.expander("✏️ Atualizar saldo de uma conta"):
 
 with st.expander("✏️ Editar limites de uma conta"):
     if contas_bancarias:
-        conta_lim = st.selectbox("Conta", contas_bancarias, format_func=lambda c: c["nome"], key="pgto_conta_limite")
+        conta_lim = st.selectbox("Conta", contas_bancarias, format_func=lambda c: f"{c['nome']} — {c['banco']}" if c.get("banco") else c["nome"], key="pgto_conta_limite")
         cl1, cl2, cl3 = st.columns(3)
         banco_edit   = cl1.text_input("Banco", value=conta_lim.get("banco") or "", key="pgto_edit_banco")
         minimo_edit  = cl2.number_input("Saldo mínimo desejado (R$)", value=float(conta_lim.get("saldo_minimo") or 0),
