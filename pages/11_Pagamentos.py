@@ -242,7 +242,7 @@ else:
         return [cor if col == "Saldo Projetado" else "" for col in row.index]
 
     st.dataframe(
-        df_quadro.drop(columns=["_projetado_num", "_legenda"]).style.apply(_estilo_projetado, axis=1),
+        df_quadro.style.apply(_estilo_projetado, axis=1).hide(axis="columns", subset=["_projetado_num", "_legenda"]),
         use_container_width=True, hide_index=True,
     )
     for r in quadro_rows:
