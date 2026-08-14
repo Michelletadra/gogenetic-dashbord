@@ -503,8 +503,9 @@ else:
         alertas.append(("🟠", f"{len(sem_conta_sel)} pagamento(s) selecionado(s) **sem conta de origem definida**, "
                                f"totalizando {brl(sem_conta_sel['Valor Final'].sum())}. Defina a conta antes de aprovar."))
 
-    diverg = df_work[df_work["Status"].isin(STATUS_APROVADOS) & df_work["_valor_aprovado"].notna() &
-                      (df_work["_valor_aprovado"].round(2) != df_work["Valor Final"].round(2))]
+    valor_aprovado_num = pd.to_numeric(df_work["_valor_aprovado"], errors="coerce")
+    diverg = df_work[df_work["Status"].isin(STATUS_APROVADOS) & valor_aprovado_num.notna() &
+                      (valor_aprovado_num.round(2) != df_work["Valor Final"].round(2))]
     if not diverg.empty:
         alertas.append(("🟠", f"{len(diverg)} pagamento(s) têm **divergência entre o valor aprovado e o valor final atual** "
                                f"(juros/desconto alterados após a aprovação). Sugestão: revalidar a aprovação."))
