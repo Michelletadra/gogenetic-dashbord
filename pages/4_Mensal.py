@@ -22,7 +22,7 @@ with st.sidebar:
     empresa_opcoes = ["Todas"] + _disponiveis
     empresa_sel    = st.selectbox("🏢 Empresa", empresa_opcoes)
     if empresa_sel != "Todas" and empresa_sel in BRAND:
-        st.image(BRAND[empresa_sel]["logo"], use_column_width=True)
+        st.image(BRAND[empresa_sel]["logo"], use_container_width=True)
     empresas_ativas = _disponiveis if empresa_sel == "Todas" else [empresa_sel]
 
     st.markdown("---")

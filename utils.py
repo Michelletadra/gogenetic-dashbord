@@ -358,9 +358,9 @@ def sidebar_header(logo_path: Optional[str] = None):
     require_auth()
     with st.sidebar:
         if logo_path:
-            st.image(logo_path, use_column_width=True)
+            st.image(logo_path, use_container_width=True)
         else:
-            st.image(str(ASSETS / "logo_gg.png"), use_column_width=True)
+            st.image(str(ASSETS / "logo_gg.png"), use_container_width=True)
         st.markdown(
             "<hr style='border:none;border-top:1px solid rgba(126,22,184,0.2);margin:12px 0 16px 0'>",
             unsafe_allow_html=True,
@@ -377,7 +377,7 @@ def sidebar_empresa_periodo(show_periodo: bool = True):
         empresa_sel = st.selectbox("🏢 Empresa", empresa_opcoes)
 
         if empresa_sel != "Todas" and empresa_sel in BRAND:
-            st.image(BRAND[empresa_sel]["logo"], use_column_width=True)
+            st.image(BRAND[empresa_sel]["logo"], use_container_width=True)
 
         empresas_ativas = NOMES if empresa_sel == "Todas" else [empresa_sel]
         dt_ini_str, dt_fim_str = "", ""

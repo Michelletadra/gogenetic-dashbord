@@ -76,7 +76,7 @@ with st.sidebar:
     empresa_sel = st.selectbox("🏢 Empresa", empresa_opcoes)
 
     if empresa_sel != "Todas" and empresa_sel in BRAND:
-        st.image(BRAND[empresa_sel]["logo"], use_column_width=True)
+        st.image(BRAND[empresa_sel]["logo"], use_container_width=True)
 
     st.markdown("---")
 
