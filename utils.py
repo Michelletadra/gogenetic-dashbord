@@ -38,7 +38,17 @@ def get_authenticator() -> stauth.Authenticate:
     return st.session_state["_authenticator"]
 
 def require_auth():
-    """Para a execução da página se o usuário não estiver autenticado."""
+    """Para a execução da página se o usuário não estiver autenticado.
+
+    Antes de bloquear, tenta restaurar a sessão a partir do cookie (login
+    'unrendered', silencioso). Sem isso, se o session_state do servidor for
+    perdido enquanto o usuário está numa página que não a Home — ex: o
+    WebSocket do Streamlit reconecta após a aba ficar em segundo plano —, ele
+    cai pro login mesmo com um cookie de 30 dias ainda válido, porque só a
+    Home reconsulta o cookie.
+    """
+    if not st.session_state.get("authentication_status"):
+        get_authenticator().login(location="unrendered")
     if not st.session_state.get("authentication_status"):
         st.error("🔒 Faça login na página inicial para acessar o dashboard.")
         st.stop()

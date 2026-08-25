@@ -1,5 +1,6 @@
 import time
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
 import requests
@@ -66,17 +67,28 @@ class EgestorClient:
         return resp.json()
 
     def _get_all_pages(self, endpoint: str, params: Optional[dict] = None) -> list:
+        """Busca a página 1 pra descobrir quantas existem, depois busca o
+        resto em paralelo — evita ida-e-volta sequencial quando há muitas
+        páginas (ex: consultas de um ano inteiro)."""
         params = dict(params or {})
-        all_data: list = []
-        page = 1
-        while True:
-            params["page"] = page
-            result = self._get(endpoint, params)
-            batch = result.get("data", [])
-            all_data.extend(batch)
-            if page >= result.get("last_page", 1):
-                break
-            page += 1
+        params["page"] = 1
+        first = self._get(endpoint, params)
+        all_data: list = list(first.get("data", []))
+        last_page = first.get("last_page", 1)
+        if last_page <= 1:
+            return all_data
+
+        def _fetch_page(page: int):
+            p = dict(params)
+            p["page"] = page
+            return page, self._get(endpoint, p).get("data", [])
+
+        pages_batches: dict = {}
+        with ThreadPoolExecutor(max_workers=min(8, last_page - 1)) as ex:
+            for page, batch in ex.map(_fetch_page, range(2, last_page + 1)):
+                pages_batches[page] = batch
+        for page in range(2, last_page + 1):
+            all_data.extend(pages_batches[page])
         return all_data
 
     def get_empresa(self) -> dict:
