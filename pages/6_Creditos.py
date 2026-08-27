@@ -199,8 +199,8 @@ if main_tab == "📊 Painel":
         hoje        = pd.Timestamp.today().normalize()
         df_validos  = df[df["status"] == "VÁLIDO"]
         df_expirad  = df[df["status"] == "EXPIRADO"]
-        df_venc30   = df_validos[df_validos["data_vencimento"] <= hoje + timedelta(days=30)]
-        df_venc7    = df_validos[df_validos["data_vencimento"] <= hoje + timedelta(days=7)]
+        df_venc30   = df_validos[(df_validos["data_vencimento"] >= hoje) & (df_validos["data_vencimento"] <= hoje + timedelta(days=30))]
+        df_venc7    = df_validos[(df_validos["data_vencimento"] >= hoje) & (df_validos["data_vencimento"] <= hoje + timedelta(days=7))]
     else:
         df_validos = df_expirad = df_venc30 = df_venc7 = pd.DataFrame()
         hoje = pd.Timestamp.today().normalize()
