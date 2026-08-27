@@ -138,6 +138,99 @@ def _get_cont_by_cli():
 def _nf_label(numero_nf) -> str:
     return f"NF {numero_nf}" if numero_nf else "Sem NF"
 
+def _render_form_consumo(cr, key_suffix=""):
+    """Formulário de registrar consumo — usado tanto na aba 💳 Créditos
+    (Lista/Registrar Consumo) quanto no perfil do cliente (🧑‍🤝‍🧑 Clientes),
+    pra não ter duas versões divergentes da mesma coisa."""
+    saldo_d = (cr["valor_original"] or 0) - (cr["valor_utilizado"] or 0)
+    st.markdown(f"**Saldo disponível: {brl(saldo_d)}**")
+
+    with st.form(f"form_consumo_dash_{cr['id']}{key_suffix}", clear_on_submit=True):
+        ca, cb = st.columns(2)
+        desc_serv = ca.text_input("Descrição do serviço *", placeholder="ex: Microbioma 1 alvo",
+                                   key=f"desc_serv_{cr['id']}{key_suffix}")
+        with cb:
+            v_uso, _ = _valor_input(
+                "Valor consumido (R$) *", key=f"v_uso_{cr['id']}{key_suffix}",
+                help=f"Saldo disponível: {brl(saldo_d)}. Pode passar — o excedente vira saldo "
+                     f"negativo, cobrado do cliente à parte.",
+            )
+
+        cc, cd = st.columns(2)
+        data_serv = cc.date_input("Data do serviço", value=date.today(),
+                                   key=f"data_serv_{cr['id']}{key_suffix}")
+        resp      = cd.text_input("Responsável", key=f"resp_{cr['id']}{key_suffix}")
+        obs_u = st.text_area("Observação", height=60, key=f"obs_u_{cr['id']}{key_suffix}")
+
+        with st.expander("➕ Detalhes por amostra (opcional)"):
+            ce, cf, cg = st.columns(3)
+            cod_serv = ce.text_input("Código do serviço", placeholder="ex: S5990",
+                                      key=f"cod_serv_{cr['id']}{key_suffix}")
+            qtd_am   = cf.number_input("Qtd amostras", min_value=0, step=1, value=0,
+                                        key=f"qtd_am_{cr['id']}{key_suffix}")
+            with cg:
+                vl_am, _ = _valor_input("Valor / amostra (R$)", key=f"vl_am_{cr['id']}{key_suffix}")
+            if qtd_am > 0 and vl_am:
+                st.caption(f"💡 {qtd_am} amostras × {brl(vl_am)} = {brl(qtd_am * vl_am)}")
+
+        if st.form_submit_button("💸 Registrar Consumo", use_container_width=True):
+            if not desc_serv.strip():
+                st.error("Informe a descrição do serviço.")
+            elif not v_uso or v_uso <= 0:
+                st.error("❌ Informe um valor válido de consumo.")
+            else:
+                novo_ut = (cr["valor_utilizado"] or 0) + v_uso
+                # Pode passar do saldo de propósito — o excedente vira saldo
+                # negativo e é cobrado do cliente à parte, não é erro.
+                novo_saldo = cr["valor_original"] - novo_ut
+                novo_st = "UTILIZADO" if novo_saldo <= 0 else cr["status"]
+                update_credito(cr["id"], {"valor_utilizado": novo_ut, "status": novo_st})
+                insert_movimentacao({
+                    "credito_id":        cr["id"],
+                    "tipo":              "UTILIZAÇÃO",
+                    "valor":             float(v_uso),
+                    "data":              str(data_serv),
+                    "responsavel":       resp or None,
+                    "observacao":        obs_u or None,
+                    "descricao_servico": desc_serv.strip(),
+                    "codigo_servico":    cod_serv.strip() or None,
+                    "qtd_amostras":      int(qtd_am) if qtd_am > 0 else None,
+                    "valor_amostra":     float(vl_am) if vl_am and vl_am > 0 else None,
+                })
+                if novo_saldo < 0:
+                    st.session_state["_consumo_ok"] = (
+                        f"✅ Consumo de {brl(v_uso)} registrado! "
+                        f"Saldo ficou negativo em {brl(abs(novo_saldo))} — cobrar esse valor do cliente."
+                    )
+                else:
+                    st.session_state["_consumo_ok"] = f"✅ Consumo de {brl(v_uso)} registrado!"
+                _clear_and_rerun()
+
+def _attach_nf_control(cr, key_suffix=""):
+    """Campo rápido pra anexar (ou trocar) a NF de um crédito, sem precisar
+    abrir outra aba. Digitou um número novo -> cria a NF e já vincula."""
+    with st.form(f"form_nf_{cr['id']}{key_suffix}", clear_on_submit=True):
+        nf1, nf2 = st.columns([3, 1])
+        nf_num = nf1.text_input(
+            "Número da NF", value=cr.get("numero_nf") or "",
+            key=f"nf_num_{cr['id']}{key_suffix}", placeholder="ex: 6640",
+        )
+        salvar_nf = nf2.form_submit_button("💾 Salvar NF", use_container_width=True)
+        if salvar_nf:
+            nf_num = nf_num.strip()
+            if not nf_num:
+                st.error("❌ Digite o número da NF antes de salvar.")
+            else:
+                nf_id = insert_nota({
+                    "numero_nf":    nf_num,
+                    "cliente_id":   cr["cliente_id"],
+                    "data_emissao": str(date.today()),
+                    "valor_total":  float(cr.get("valor_original") or 0),
+                })
+                update_credito(cr["id"], {"nota_fiscal_id": nf_id})
+                st.session_state["_edit_cred_ok"] = f"✅ NF {nf_num} vinculada ao crédito!"
+                _clear_and_rerun()
+
 def _parse_valor(texto: str):
     """Converte texto digitado em R$ pra float — aceita '2500', '2500.00',
     '2500,00' e '2.500,00' (o campo numérico nativo do navegador só aceita
@@ -342,6 +435,8 @@ if main_tab == "🧑‍🤝‍🧑 Clientes":
         if cli_sub_tab == "💳 Créditos":
             if st.session_state.get("_consumo_cli_ok"):
                 st.success(st.session_state.pop("_consumo_cli_ok"))
+            if st.session_state.get("_edit_cred_ok"):
+                st.success(st.session_state.pop("_edit_cred_ok"))
             if not creds_cli:
                 st.info("Sem créditos.")
             else:
@@ -360,25 +455,24 @@ if main_tab == "🧑‍🤝‍🧑 Clientes":
                         cc.metric("Saldo",     brl(saldo_cr))
                         if dias is not None:
                             st.caption(f"Vencimento: {venc.strftime('%d/%m/%Y')} · {dias} dias")
-                        if cr["status"] == "VÁLIDO" and saldo_cr > 0:
-                            v, _ = _valor_input("Valor a consumir", key=f"v_cons_{cr['id']}",
-                                                 help=f"Máximo disponível: {brl(saldo_cr)}")
-                            with st.form(f"cons_dash_{cr['id']}", clear_on_submit=True):
-                                resp = st.text_input("Responsável", key=f"resp_{cr['id']}")
-                                if st.form_submit_button("💸 Registrar consumo", use_container_width=True):
-                                    if not v or v <= 0:
-                                        st.error("❌ Informe um valor válido antes de registrar.")
-                                    elif v > saldo_cr:
-                                        st.error(f"❌ Valor maior que o saldo disponível ({brl(saldo_cr)}).")
-                                    else:
-                                        novo_ut = (cr["valor_utilizado"] or 0) + v
-                                        novo_st = "UTILIZADO" if (cr["valor_original"] - novo_ut) <= 0 else "VÁLIDO"
-                                        update_credito(cr["id"], {"valor_utilizado": novo_ut, "status": novo_st})
-                                        insert_movimentacao({"credito_id": cr["id"], "tipo": "UTILIZAÇÃO",
-                                                             "valor": float(v), "data": str(date.today()),
-                                                             "responsavel": resp or None})
-                                        st.session_state["_consumo_cli_ok"] = f"✅ {brl(v)} consumido!"
-                                        _clear_and_rerun()
+
+                        st.markdown("**Número da NF**")
+                        _attach_nf_control(cr, key_suffix="_cli")
+
+                        if cr["status"] != "CANCELADO" and saldo_cr > 0:
+                            st.markdown("**Registrar consumo**")
+                            _render_form_consumo(cr, key_suffix="_cli")
+
+                        st.markdown("---")
+                        movs_do_credito = [m for m in movs_all if m.get("credito_id") == cr["id"]]
+                        if movs_do_credito:
+                            st.caption(f"⚠️ Tem {len(movs_do_credito)} movimentação(ões) — excluir apaga junto.")
+                        confirma_del_cli = st.checkbox("Confirmo a exclusão", key=f"del_confirm_cli_{cr['id']}")
+                        if st.button("🗑️ Excluir crédito", key=f"del_btn_cli_{cr['id']}",
+                                     disabled=not confirma_del_cli):
+                            delete_credito(cr["id"])
+                            st.session_state["_edit_cred_ok"] = f"🗑️ Crédito excluído."
+                            _clear_and_rerun()
 
         if cli_sub_tab == "📄 Notas Fiscais":
             if notas_cli:
@@ -487,71 +581,6 @@ if main_tab == "💳 Créditos":
         key="cred_creditos_subtab",
     )
 
-    def _render_form_consumo(cr, key_suffix=""):
-        saldo_d = (cr["valor_original"] or 0) - (cr["valor_utilizado"] or 0)
-        st.markdown(f"**Saldo disponível: {brl(saldo_d)}**")
-
-        with st.form(f"form_consumo_dash_{cr['id']}{key_suffix}", clear_on_submit=True):
-            ca, cb = st.columns(2)
-            desc_serv = ca.text_input("Descrição do serviço *", placeholder="ex: Microbioma 1 alvo",
-                                       key=f"desc_serv_{cr['id']}{key_suffix}")
-            with cb:
-                v_uso, _ = _valor_input(
-                    "Valor consumido (R$) *", key=f"v_uso_{cr['id']}{key_suffix}",
-                    help=f"Saldo disponível: {brl(saldo_d)}. Pode passar — o excedente vira saldo "
-                         f"negativo, cobrado do cliente à parte.",
-                )
-
-            cc, cd = st.columns(2)
-            data_serv = cc.date_input("Data do serviço", value=date.today(),
-                                       key=f"data_serv_{cr['id']}{key_suffix}")
-            resp      = cd.text_input("Responsável", key=f"resp_{cr['id']}{key_suffix}")
-            obs_u = st.text_area("Observação", height=60, key=f"obs_u_{cr['id']}{key_suffix}")
-
-            with st.expander("➕ Detalhes por amostra (opcional)"):
-                ce, cf, cg = st.columns(3)
-                cod_serv = ce.text_input("Código do serviço", placeholder="ex: S5990",
-                                          key=f"cod_serv_{cr['id']}{key_suffix}")
-                qtd_am   = cf.number_input("Qtd amostras", min_value=0, step=1, value=0,
-                                            key=f"qtd_am_{cr['id']}{key_suffix}")
-                with cg:
-                    vl_am, _ = _valor_input("Valor / amostra (R$)", key=f"vl_am_{cr['id']}{key_suffix}")
-                if qtd_am > 0 and vl_am:
-                    st.caption(f"💡 {qtd_am} amostras × {brl(vl_am)} = {brl(qtd_am * vl_am)}")
-
-            if st.form_submit_button("💸 Registrar Consumo", use_container_width=True):
-                if not desc_serv.strip():
-                    st.error("Informe a descrição do serviço.")
-                elif not v_uso or v_uso <= 0:
-                    st.error("❌ Informe um valor válido de consumo.")
-                else:
-                    novo_ut = (cr["valor_utilizado"] or 0) + v_uso
-                    # Pode passar do saldo de propósito — o excedente vira saldo
-                    # negativo e é cobrado do cliente à parte, não é erro.
-                    novo_saldo = cr["valor_original"] - novo_ut
-                    novo_st = "UTILIZADO" if novo_saldo <= 0 else cr["status"]
-                    update_credito(cr["id"], {"valor_utilizado": novo_ut, "status": novo_st})
-                    insert_movimentacao({
-                        "credito_id":        cr["id"],
-                        "tipo":              "UTILIZAÇÃO",
-                        "valor":             float(v_uso),
-                        "data":              str(data_serv),
-                        "responsavel":       resp or None,
-                        "observacao":        obs_u or None,
-                        "descricao_servico": desc_serv.strip(),
-                        "codigo_servico":    cod_serv.strip() or None,
-                        "qtd_amostras":      int(qtd_am) if qtd_am > 0 else None,
-                        "valor_amostra":     float(vl_am) if vl_am and vl_am > 0 else None,
-                    })
-                    if novo_saldo < 0:
-                        st.session_state["_consumo_ok"] = (
-                            f"✅ Consumo de {brl(v_uso)} registrado! "
-                            f"Saldo ficou negativo em {brl(abs(novo_saldo))} — cobrar esse valor do cliente."
-                        )
-                    else:
-                        st.session_state["_consumo_ok"] = f"✅ Consumo de {brl(v_uso)} registrado!"
-                    _clear_and_rerun()
-
     if cred_action == "📋 Lista":
         if st.session_state.get("_edit_cred_ok"):
             st.success(st.session_state.pop("_edit_cred_ok"))
@@ -599,7 +628,6 @@ if main_tab == "💳 Créditos":
             df_creds_show = df_creds_tab.drop(columns=["_id"]).copy()
             for col_brl in ["Original","Utilizado","Saldo"]:
                 df_creds_show[col_brl] = df_creds_show[col_brl].apply(brl)
-            st.dataframe(df_creds_show, use_container_width=True, hide_index=True)
 
             import io as _io
             buf_lista = _io.BytesIO()
@@ -613,30 +641,68 @@ if main_tab == "💳 Créditos":
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 key="dl_lista_creditos",
             )
+            st.markdown("---")
 
-            # Ao buscar por NF/cliente, já oferece o consumo direto do crédito
-            # encontrado — sem precisar ir na aba Registrar Consumo e escolher
-            # cliente/crédito de novo do zero. Aceita qualquer crédito com saldo
-            # (inclusive EXPIRADO — o vencimento não impede usar o que sobrou),
-            # só CANCELADO fica de fora mesmo tendo saldo.
-            if busca_nf:
-                creds_para_consumo = [
-                    c for c in creds_tab
-                    if c["status"] != "CANCELADO"
-                    and ((c.get("valor_original") or 0) - (c.get("valor_utilizado") or 0)) > 0
-                ]
-                if creds_para_consumo:
-                    st.markdown("---")
-                    for cr_busca in creds_para_consumo:
-                        saldo_b = (cr_busca.get("valor_original") or 0) - (cr_busca.get("valor_utilizado") or 0)
-                        alerta_exp = " ⚠️ EXPIRADO" if cr_busca["status"] == "EXPIRADO" else ""
-                        titulo = (f"💸 Registrar consumo — {cr_busca.get('cliente_nome','?')} — "
-                                  f"{_nf_label(cr_busca.get('numero_nf'))} — Saldo: {brl(saldo_b)}{alerta_exp}")
-                        with st.expander(titulo, expanded=(len(creds_para_consumo) == 1)):
-                            _render_form_consumo(cr_busca, key_suffix="_busca")
+            # Uma linha por crédito, com 💸 (baixar/registrar consumo) e 🗑️
+            # (excluir) direto ali — sem precisar abrir outra aba e escolher de
+            # novo o mesmo crédito num dropdown.
+            _col_w = [0.3, 2.2, 0.9, 1.1, 1.1, 1.1, 1.0, 1.0, 0.55, 0.55]
+            hcols = st.columns(_col_w)
+            for h, label in zip(hcols, ["", "Cliente", "NF", "Original", "Utilizado",
+                                         "Saldo", "Vencimento", "Status", "", ""]):
+                if label:
+                    h.markdown(f"**{label}**")
 
-            # Editar um crédito existente (valor, vencimento, status)
-            with st.expander("✏️ Editar um crédito"):
+            for cr in creds_tab:
+                saldo = (cr.get("valor_original") or 0) - (cr.get("valor_utilizado") or 0)
+                venc  = pd.to_datetime(cr.get("data_vencimento"), errors="coerce")
+                dias  = int((venc - hoje3).days) if pd.notna(venc) else None
+                alerta = ""
+                if cr["status"] == "VÁLIDO" and dias is not None:
+                    alerta = "🔴" if dias <= 7 else ("🟡" if dias <= 30 else "🟢")
+                venc_str = venc.strftime("%d/%m/%Y") if pd.notna(venc) else "—"
+
+                rc = st.columns(_col_w)
+                rc[0].markdown(alerta)
+                rc[1].markdown(cr.get("cliente_nome", "—"))
+                rc[2].markdown(_nf_label(cr.get("numero_nf")))
+                rc[3].markdown(brl(cr.get("valor_original")))
+                rc[4].markdown(brl(cr.get("valor_utilizado")))
+                rc[5].markdown(brl(saldo))
+                rc[6].markdown(venc_str)
+                rc[7].markdown(cr["status"])
+
+                pode_consumir = cr["status"] != "CANCELADO" and saldo > 0
+                with rc[8]:
+                    if pode_consumir:
+                        with st.popover("💸"):
+                            alerta_exp = " ⚠️ EXPIRADO" if cr["status"] == "EXPIRADO" else ""
+                            st.caption(f"{cr.get('cliente_nome','?')} — {_nf_label(cr.get('numero_nf'))}{alerta_exp}")
+                            _render_form_consumo(cr, key_suffix=f"_row_{cr['id']}")
+
+                with rc[9]:
+                    with st.popover("🗑️"):
+                        st.caption(f"Excluir crédito de {cr.get('cliente_nome','?')} — {brl(cr.get('valor_original'))}")
+                        movs_do_credito = [m for m in movs_all if m.get("credito_id") == cr["id"]]
+                        if movs_do_credito:
+                            st.warning(
+                                f"⚠️ Tem {len(movs_do_credito)} movimentação(ões) registrada(s) — "
+                                f"excluir apaga esse histórico junto."
+                            )
+                        confirma_del = st.checkbox("Confirmo a exclusão", key=f"del_confirm_{cr['id']}")
+                        if st.button("🗑️ Excluir definitivamente", key=f"del_btn_{cr['id']}",
+                                     disabled=not confirma_del, use_container_width=True):
+                            delete_credito(cr["id"])
+                            st.session_state["_edit_cred_ok"] = (
+                                f"🗑️ Crédito de {cr.get('cliente_nome','?')} excluído."
+                            )
+                            _clear_and_rerun()
+
+            st.markdown("---")
+
+            # Editar detalhes de um crédito (valor, vencimento, status, NF, contrato, obs)
+            # — excluir agora é direto na linha da tabela (🗑️ acima).
+            with st.expander("✏️ Editar detalhes de um crédito"):
                 opts_edit = {
                     f"{cr.get('cliente_nome','?')} — {_nf_label(cr.get('numero_nf'))} — "
                     f"{brl(cr.get('valor_original'))} (#{cr['id']})": cr
