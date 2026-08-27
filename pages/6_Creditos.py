@@ -492,7 +492,8 @@ if main_tab == "💳 Créditos":
             with cb:
                 v_uso, _ = _valor_input(
                     "Valor consumido (R$) *", key=f"v_uso_{cr['id']}{key_suffix}",
-                    help=f"Máximo disponível: {brl(saldo_d)}",
+                    help=f"Saldo disponível: {brl(saldo_d)}. Pode passar — o excedente vira saldo "
+                         f"negativo, cobrado do cliente à parte.",
                 )
 
             cc, cd = st.columns(2)
@@ -517,15 +518,12 @@ if main_tab == "💳 Créditos":
                     st.error("Informe a descrição do serviço.")
                 elif not v_uso or v_uso <= 0:
                     st.error("❌ Informe um valor válido de consumo.")
-                elif v_uso > saldo_d:
-                    st.error(f"❌ Valor maior que o saldo disponível ({brl(saldo_d)}).")
                 else:
                     novo_ut = (cr["valor_utilizado"] or 0) + v_uso
-                    # Só força UTILIZADO quando o saldo zera. Fora isso, mantém o
-                    # status como estava (ex: um crédito EXPIRADO com saldo, ao
-                    # receber um consumo parcial, continua EXPIRADO — consumir o
-                    # que sobrou não muda a data de vencimento já passada).
-                    novo_st = "UTILIZADO" if (cr["valor_original"] - novo_ut) <= 0 else cr["status"]
+                    # Pode passar do saldo de propósito — o excedente vira saldo
+                    # negativo e é cobrado do cliente à parte, não é erro.
+                    novo_saldo = cr["valor_original"] - novo_ut
+                    novo_st = "UTILIZADO" if novo_saldo <= 0 else cr["status"]
                     update_credito(cr["id"], {"valor_utilizado": novo_ut, "status": novo_st})
                     insert_movimentacao({
                         "credito_id":        cr["id"],
@@ -539,7 +537,13 @@ if main_tab == "💳 Créditos":
                         "qtd_amostras":      int(qtd_am) if qtd_am > 0 else None,
                         "valor_amostra":     float(vl_am) if vl_am and vl_am > 0 else None,
                     })
-                    st.session_state["_consumo_ok"] = f"✅ Consumo de {brl(v_uso)} registrado!"
+                    if novo_saldo < 0:
+                        st.session_state["_consumo_ok"] = (
+                            f"✅ Consumo de {brl(v_uso)} registrado! "
+                            f"Saldo ficou negativo em {brl(abs(novo_saldo))} — cobrar esse valor do cliente."
+                        )
+                    else:
+                        st.session_state["_consumo_ok"] = f"✅ Consumo de {brl(v_uso)} registrado!"
                     _clear_and_rerun()
 
     if cred_action == "📋 Lista":
