@@ -521,7 +521,11 @@ if main_tab == "💳 Créditos":
                     st.error(f"❌ Valor maior que o saldo disponível ({brl(saldo_d)}).")
                 else:
                     novo_ut = (cr["valor_utilizado"] or 0) + v_uso
-                    novo_st = "UTILIZADO" if (cr["valor_original"] - novo_ut) <= 0 else "VÁLIDO"
+                    # Só força UTILIZADO quando o saldo zera. Fora isso, mantém o
+                    # status como estava (ex: um crédito EXPIRADO com saldo, ao
+                    # receber um consumo parcial, continua EXPIRADO — consumir o
+                    # que sobrou não muda a data de vencimento já passada).
+                    novo_st = "UTILIZADO" if (cr["valor_original"] - novo_ut) <= 0 else cr["status"]
                     update_credito(cr["id"], {"valor_utilizado": novo_ut, "status": novo_st})
                     insert_movimentacao({
                         "credito_id":        cr["id"],
@@ -602,15 +606,22 @@ if main_tab == "💳 Créditos":
 
             # Ao buscar por NF/cliente, já oferece o consumo direto do crédito
             # encontrado — sem precisar ir na aba Registrar Consumo e escolher
-            # cliente/crédito de novo do zero.
+            # cliente/crédito de novo do zero. Aceita qualquer crédito com saldo
+            # (inclusive EXPIRADO — o vencimento não impede usar o que sobrou),
+            # só CANCELADO fica de fora mesmo tendo saldo.
             if busca_nf:
-                creds_para_consumo = [c for c in creds_tab if c["status"] == "VÁLIDO"]
+                creds_para_consumo = [
+                    c for c in creds_tab
+                    if c["status"] != "CANCELADO"
+                    and ((c.get("valor_original") or 0) - (c.get("valor_utilizado") or 0)) > 0
+                ]
                 if creds_para_consumo:
                     st.markdown("---")
                     for cr_busca in creds_para_consumo:
                         saldo_b = (cr_busca.get("valor_original") or 0) - (cr_busca.get("valor_utilizado") or 0)
+                        alerta_exp = " ⚠️ EXPIRADO" if cr_busca["status"] == "EXPIRADO" else ""
                         titulo = (f"💸 Registrar consumo — {cr_busca.get('cliente_nome','?')} — "
-                                  f"{_nf_label(cr_busca.get('numero_nf'))} — Saldo: {brl(saldo_b)}")
+                                  f"{_nf_label(cr_busca.get('numero_nf'))} — Saldo: {brl(saldo_b)}{alerta_exp}")
                         with st.expander(titulo, expanded=(len(creds_para_consumo) == 1)):
                             _render_form_consumo(cr_busca, key_suffix="_busca")
 
@@ -772,9 +783,15 @@ if main_tab == "💳 Créditos":
         if st.session_state.get("_consumo_ok"):
             st.success(st.session_state.pop("_consumo_ok"))
 
-        creds_validos = [c for c in creditos_all if c["status"] == "VÁLIDO"]
+        # Aceita qualquer crédito com saldo, mesmo EXPIRADO — só CANCELADO fica
+        # de fora. Ver mesma regra no bloco de busca da aba Lista.
+        creds_validos = [
+            c for c in creditos_all
+            if c["status"] != "CANCELADO"
+            and ((c.get("valor_original") or 0) - (c.get("valor_utilizado") or 0)) > 0
+        ]
         if not creds_validos:
-            st.info("Nenhum crédito válido disponível.")
+            st.info("Nenhum crédito com saldo disponível.")
         else:
             # Filtro por cliente primeiro, pra não ter que procurar num dropdown
             # gigante com todo mundo junto.
@@ -792,7 +809,8 @@ if main_tab == "💳 Créditos":
                 # (mesmo cliente, mesma NF, mesmo saldo) — já vi isso acontecer.
                 opts = {
                     f"{c.get('cliente_nome','?')} — {_nf_label(c.get('numero_nf'))} — "
-                    f"Saldo: {brl((c['valor_original'] or 0)-(c['valor_utilizado'] or 0))} (#{c['id']})": c
+                    f"Saldo: {brl((c['valor_original'] or 0)-(c['valor_utilizado'] or 0))}"
+                    f"{' ⚠️ EXPIRADO' if c['status'] == 'EXPIRADO' else ''} (#{c['id']})": c
                     for c in creds_filtrados
                 }
                 # Fora do form: selecionar outro crédito atualiza o saldo na hora,
