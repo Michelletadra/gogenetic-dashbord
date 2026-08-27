@@ -765,7 +765,13 @@ if main_tab == "💳 Créditos":
                                              help="Digite o valor real do crédito antes de cadastrar.")
                 venc   = c2.date_input("Vencimento *", value=date.today() + timedelta(days=30),
                                         help="Data até quando o crédito vale. Ajuste conforme o combinado com o cliente.")
-                nf_sel = st.selectbox("NF vinculada (opcional)", list(nf_opts.keys()))
+                nfc1, nfc2 = st.columns(2)
+                nf_sel  = nfc1.selectbox("NF já cadastrada (opcional)", list(nf_opts.keys()))
+                nf_nova = nfc2.text_input(
+                    "Ou número de uma NF nova", placeholder="ex: 6640",
+                    help="Se a NF ainda não existe no sistema, digite o número aqui — ela é "
+                         "criada e já vinculada a este crédito, sem precisar ir na aba Notas Fiscais antes.",
+                )
 
                 with st.expander("➕ Mais detalhes (opcional)"):
                     obs = st.text_area("Observações", height=80)
@@ -786,10 +792,20 @@ if main_tab == "💳 Créditos":
                     elif valor < 1:
                         st.error(f"❌ Valor muito baixo ({brl(valor)}). "
                                  f"Confirme se digitou o valor certo antes de cadastrar.")
+                    elif nf_nova.strip() and nf_sel != "— Sem NF —":
+                        st.error("❌ Escolha uma NF já cadastrada OU digite uma nova — não os dois.")
                     else:
+                        nota_fiscal_id_sel = nf_opts[nf_sel]
+                        if nf_nova.strip():
+                            nota_fiscal_id_sel = insert_nota({
+                                "numero_nf":    nf_nova.strip(),
+                                "cliente_id":   cli_id_sel,
+                                "data_emissao": str(date.today()),
+                                "valor_total":  float(valor),
+                            })
                         payload = {
                             "cliente_id":      cli_id_sel,
-                            "nota_fiscal_id":  nf_opts[nf_sel],
+                            "nota_fiscal_id":  nota_fiscal_id_sel,
                             "valor_original":  float(valor),
                             "data_vencimento": str(venc),
                             "observacoes":     obs or None,
