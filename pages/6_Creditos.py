@@ -638,6 +638,28 @@ if main_tab == "💳 Créditos":
                 }
                 sel_edit_label = st.selectbox("Crédito:", list(opts_edit.keys()), key="sel_edit_cred")
                 cr_edit = opts_edit[sel_edit_label]
+
+                # Mesmas opções de NF/contrato do cadastro (➕ Novo Crédito), só que
+                # já pré-selecionadas com o que o crédito tem hoje.
+                notas_cl_edit = _nota_by_cli.get(cr_edit.get("cliente_id"), [])
+                nf_opts_edit  = {"— Sem NF —": None}
+                nf_opts_edit.update({f"NF {n['numero_nf']}": n["id"] for n in notas_cl_edit})
+                nf_labels_edit = list(nf_opts_edit.keys())
+                nf_atual_idx = next(
+                    (i for i, v in enumerate(nf_opts_edit.values()) if v == cr_edit.get("nota_fiscal_id")), 0
+                )
+
+                contratos_cl_edit = _get_cont_by_cli().get(cr_edit.get("cliente_id"), [])
+                ct_opts_edit = {"— Sem contrato —": None}
+                ct_opts_edit.update({
+                    f"{ct.get('contratante','?')} ({ct.get('empresa_gg','—')}) · {ct.get('tipo_contrato','—')}": ct.get("id")
+                    for ct in contratos_cl_edit
+                })
+                ct_labels_edit = list(ct_opts_edit.keys())
+                ct_atual_idx = next(
+                    (i for i, v in enumerate(ct_opts_edit.values()) if v == cr_edit.get("contrato_id")), 0
+                )
+
                 with st.form(f"form_edit_cred_{cr_edit['id']}"):
                     ce1, ce2 = st.columns(2)
                     with ce1:
@@ -655,6 +677,16 @@ if main_tab == "💳 Créditos":
                         "Status", status_opts, key=f"edit_status_{cr_edit['id']}",
                         index=status_opts.index(cr_edit.get("status")) if cr_edit.get("status") in status_opts else 0,
                     )
+                    novo_nf_label = st.selectbox(
+                        "NF vinculada", nf_labels_edit, index=nf_atual_idx, key=f"edit_nf_{cr_edit['id']}",
+                    )
+                    novo_ct_label = st.selectbox(
+                        "Contrato vinculado", ct_labels_edit, index=ct_atual_idx, key=f"edit_ct_{cr_edit['id']}",
+                    )
+                    nova_obs = st.text_area(
+                        "Observações", key=f"edit_obs_{cr_edit['id']}",
+                        value=cr_edit.get("observacoes") or "", height=80,
+                    )
                     if st.form_submit_button("💾 Salvar alterações", use_container_width=True):
                         if novo_valor is None:
                             st.error("❌ Informe um valor válido antes de salvar.")
@@ -663,6 +695,9 @@ if main_tab == "💳 Créditos":
                                 "valor_original":  float(novo_valor),
                                 "data_vencimento": str(novo_venc),
                                 "status":          novo_status,
+                                "nota_fiscal_id":  nf_opts_edit[novo_nf_label],
+                                "contrato_id":     ct_opts_edit[novo_ct_label],
+                                "observacoes":     nova_obs or None,
                             })
                             st.session_state["_edit_cred_ok"] = (
                                 f"✅ Crédito de {cr_edit.get('cliente_nome','?')} atualizado!"
