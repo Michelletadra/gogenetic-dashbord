@@ -481,6 +481,63 @@ if main_tab == "💳 Créditos":
         key="cred_creditos_subtab",
     )
 
+    def _render_form_consumo(cr, key_suffix=""):
+        saldo_d = (cr["valor_original"] or 0) - (cr["valor_utilizado"] or 0)
+        st.markdown(f"**Saldo disponível: {brl(saldo_d)}**")
+
+        with st.form(f"form_consumo_dash_{cr['id']}{key_suffix}", clear_on_submit=True):
+            ca, cb = st.columns(2)
+            desc_serv = ca.text_input("Descrição do serviço *", placeholder="ex: Microbioma 1 alvo",
+                                       key=f"desc_serv_{cr['id']}{key_suffix}")
+            with cb:
+                v_uso, _ = _valor_input(
+                    "Valor consumido (R$) *", key=f"v_uso_{cr['id']}{key_suffix}",
+                    help=f"Máximo disponível: {brl(saldo_d)}",
+                )
+
+            cc, cd = st.columns(2)
+            data_serv = cc.date_input("Data do serviço", value=date.today(),
+                                       key=f"data_serv_{cr['id']}{key_suffix}")
+            resp      = cd.text_input("Responsável", key=f"resp_{cr['id']}{key_suffix}")
+            obs_u = st.text_area("Observação", height=60, key=f"obs_u_{cr['id']}{key_suffix}")
+
+            with st.expander("➕ Detalhes por amostra (opcional)"):
+                ce, cf, cg = st.columns(3)
+                cod_serv = ce.text_input("Código do serviço", placeholder="ex: S5990",
+                                          key=f"cod_serv_{cr['id']}{key_suffix}")
+                qtd_am   = cf.number_input("Qtd amostras", min_value=0, step=1, value=0,
+                                            key=f"qtd_am_{cr['id']}{key_suffix}")
+                with cg:
+                    vl_am, _ = _valor_input("Valor / amostra (R$)", key=f"vl_am_{cr['id']}{key_suffix}")
+                if qtd_am > 0 and vl_am:
+                    st.caption(f"💡 {qtd_am} amostras × {brl(vl_am)} = {brl(qtd_am * vl_am)}")
+
+            if st.form_submit_button("💸 Registrar Consumo", use_container_width=True):
+                if not desc_serv.strip():
+                    st.error("Informe a descrição do serviço.")
+                elif not v_uso or v_uso <= 0:
+                    st.error("❌ Informe um valor válido de consumo.")
+                elif v_uso > saldo_d:
+                    st.error(f"❌ Valor maior que o saldo disponível ({brl(saldo_d)}).")
+                else:
+                    novo_ut = (cr["valor_utilizado"] or 0) + v_uso
+                    novo_st = "UTILIZADO" if (cr["valor_original"] - novo_ut) <= 0 else "VÁLIDO"
+                    update_credito(cr["id"], {"valor_utilizado": novo_ut, "status": novo_st})
+                    insert_movimentacao({
+                        "credito_id":        cr["id"],
+                        "tipo":              "UTILIZAÇÃO",
+                        "valor":             float(v_uso),
+                        "data":              str(data_serv),
+                        "responsavel":       resp or None,
+                        "observacao":        obs_u or None,
+                        "descricao_servico": desc_serv.strip(),
+                        "codigo_servico":    cod_serv.strip() or None,
+                        "qtd_amostras":      int(qtd_am) if qtd_am > 0 else None,
+                        "valor_amostra":     float(vl_am) if vl_am and vl_am > 0 else None,
+                    })
+                    st.session_state["_consumo_ok"] = f"✅ Consumo de {brl(v_uso)} registrado!"
+                    _clear_and_rerun()
+
     if cred_action == "📋 Lista":
         if st.session_state.get("_edit_cred_ok"):
             st.success(st.session_state.pop("_edit_cred_ok"))
@@ -542,6 +599,20 @@ if main_tab == "💳 Créditos":
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 key="dl_lista_creditos",
             )
+
+            # Ao buscar por NF/cliente, já oferece o consumo direto do crédito
+            # encontrado — sem precisar ir na aba Registrar Consumo e escolher
+            # cliente/crédito de novo do zero.
+            if busca_nf:
+                creds_para_consumo = [c for c in creds_tab if c["status"] == "VÁLIDO"]
+                if creds_para_consumo:
+                    st.markdown("---")
+                    for cr_busca in creds_para_consumo:
+                        saldo_b = (cr_busca.get("valor_original") or 0) - (cr_busca.get("valor_utilizado") or 0)
+                        titulo = (f"💸 Registrar consumo — {cr_busca.get('cliente_nome','?')} — "
+                                  f"{_nf_label(cr_busca.get('numero_nf'))} — Saldo: {brl(saldo_b)}")
+                        with st.expander(titulo, expanded=(len(creds_para_consumo) == 1)):
+                            _render_form_consumo(cr_busca, key_suffix="_busca")
 
             # Editar um crédito existente (valor, vencimento, status)
             with st.expander("✏️ Editar um crédito"):
@@ -727,59 +798,9 @@ if main_tab == "💳 Créditos":
                 # Fora do form: selecionar outro crédito atualiza o saldo na hora,
                 # em vez de só mudar depois de enviar (o que já causou confusão de
                 # "saldo não bate" — a tela ficava mostrando o crédito anterior).
-                label   = st.selectbox("Crédito *", list(opts.keys()), key="consumo_cred_sel")
-                cr      = opts[label]
-                saldo_d = (cr["valor_original"] or 0) - (cr["valor_utilizado"] or 0)
-                st.markdown(f"**Saldo disponível: {brl(saldo_d)}**")
-
-                with st.form(f"form_consumo_dash_{cr['id']}", clear_on_submit=True):
-                    ca, cb = st.columns(2)
-                    desc_serv = ca.text_input("Descrição do serviço *", placeholder="ex: Microbioma 1 alvo")
-                    with cb:
-                        v_uso, _ = _valor_input(
-                            "Valor consumido (R$) *", key=f"v_uso_{cr['id']}",
-                            help=f"Máximo disponível: {brl(saldo_d)}",
-                        )
-
-                    cc, cd = st.columns(2)
-                    data_serv = cc.date_input("Data do serviço", value=date.today())
-                    resp      = cd.text_input("Responsável")
-                    obs_u = st.text_area("Observação", height=60)
-
-                    with st.expander("➕ Detalhes por amostra (opcional)"):
-                        ce, cf, cg = st.columns(3)
-                        cod_serv = ce.text_input("Código do serviço", placeholder="ex: S5990")
-                        qtd_am   = cf.number_input("Qtd amostras", min_value=0, step=1, value=0)
-                        with cg:
-                            vl_am, _ = _valor_input("Valor / amostra (R$)", key=f"vl_am_{cr['id']}")
-                        if qtd_am > 0 and vl_am:
-                            st.caption(f"💡 {qtd_am} amostras × {brl(vl_am)} = {brl(qtd_am * vl_am)}")
-
-                    if st.form_submit_button("💸 Registrar Consumo", use_container_width=True):
-                        if not desc_serv.strip():
-                            st.error("Informe a descrição do serviço.")
-                        elif not v_uso or v_uso <= 0:
-                            st.error("❌ Informe um valor válido de consumo.")
-                        elif v_uso > saldo_d:
-                            st.error(f"❌ Valor maior que o saldo disponível ({brl(saldo_d)}).")
-                        else:
-                            novo_ut = (cr["valor_utilizado"] or 0) + v_uso
-                            novo_st = "UTILIZADO" if (cr["valor_original"] - novo_ut) <= 0 else "VÁLIDO"
-                            update_credito(cr["id"], {"valor_utilizado": novo_ut, "status": novo_st})
-                            insert_movimentacao({
-                                "credito_id":        cr["id"],
-                                "tipo":              "UTILIZAÇÃO",
-                                "valor":             float(v_uso),
-                                "data":              str(data_serv),
-                                "responsavel":       resp or None,
-                                "observacao":        obs_u or None,
-                                "descricao_servico": desc_serv.strip(),
-                                "codigo_servico":    cod_serv.strip() or None,
-                                "qtd_amostras":      int(qtd_am) if qtd_am > 0 else None,
-                                "valor_amostra":     float(vl_am) if vl_am and vl_am > 0 else None,
-                            })
-                            st.session_state["_consumo_ok"] = f"✅ Consumo de {brl(v_uso)} registrado!"
-                            _clear_and_rerun()
+                label = st.selectbox("Crédito *", list(opts.keys()), key="consumo_cred_sel")
+                cr    = opts[label]
+                _render_form_consumo(cr)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 4 — MOVIMENTAÇÕES
