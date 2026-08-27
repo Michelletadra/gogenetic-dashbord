@@ -31,7 +31,18 @@ if "code" in params and params.get("state") == "bling_dashboard":
 
 # ── Autenticação ───────────────────────────────────────────────────────────────
 authenticator = get_authenticator()
+_estava_autenticada = bool(st.session_state.get("authentication_status"))
 authenticator.login(location="main")
+
+# streamlit_authenticator só faz o rerun de confirmação que garante a gravação
+# do cookie de "lembrar login" quando as credenciais vêm de um arquivo YAML
+# (checa `self.path`, que só existe nesse caso). Como usamos um dict Python
+# (CREDENTIALS em utils.py) esse rerun nunca acontece sozinho, e o cookie podia
+# não ser gravado a tempo — forçando login toda vez que a aba era reaberta,
+# mesmo dentro dos 30 dias de validade do cookie. Replicamos aqui o mesmo passo
+# de confirmação: um único rerun extra logo após o login ter sucesso.
+if st.session_state.get("authentication_status") and not _estava_autenticada:
+    st.rerun()
 
 if st.session_state.get("authentication_status") is False:
     st.error("❌ Usuário ou senha incorretos.")
