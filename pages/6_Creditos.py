@@ -138,6 +138,20 @@ def _get_cont_by_cli():
 def _nf_label(numero_nf) -> str:
     return f"NF {numero_nf}" if numero_nf else "Sem NF"
 
+def _status_dot(status: str, dias: "int | None") -> str:
+    """Bolinha de status — todo crédito tem uma, não só os VÁLIDO vencendo
+    (antes só VÁLIDO ganhava bolinha e o resto ficava sem nada, inconsistente
+    numa lista com status misturados)."""
+    if status == "VÁLIDO":
+        if dias is None:
+            return "🟢"
+        return "🔴" if dias <= 7 else ("🟡" if dias <= 30 else "🟢")
+    if status == "EXPIRADO":
+        return "🟠"
+    if status == "UTILIZADO":
+        return "⚪"
+    return "⚫"  # CANCELADO ou outro
+
 def _render_form_consumo(cr, key_suffix=""):
     """Formulário de registrar consumo — usado tanto na aba 💳 Créditos
     (Lista/Registrar Consumo) quanto no perfil do cliente (🧑‍🤝‍🧑 Clientes),
@@ -444,9 +458,7 @@ if main_tab == "🧑‍🤝‍🧑 Clientes":
                     saldo_cr = (cr["valor_original"] or 0) - (cr["valor_utilizado"] or 0)
                     venc = pd.to_datetime(cr["data_vencimento"], errors="coerce")
                     dias = int((venc - hoje_ts).days) if pd.notna(venc) else None
-                    alerta = ""
-                    if cr["status"] == "VÁLIDO" and dias is not None:
-                        alerta = "🔴 " if dias <= 7 else ("🟡 " if dias <= 30 else "🟢 ")
+                    alerta = _status_dot(cr["status"], dias) + " "
                     nf_label = _nf_label(cr.get('numero_nf'))
                     with st.expander(f"{alerta}{nf_label}  ·  {brl(saldo_cr)}  ·  {cr['status']}"):
                         ca, cb, cc = st.columns(3)
@@ -616,9 +628,7 @@ if main_tab == "💳 Créditos":
                 saldo = (cr.get("valor_original") or 0) - (cr.get("valor_utilizado") or 0)
                 venc  = pd.to_datetime(cr.get("data_vencimento"), errors="coerce")
                 dias  = int((venc - hoje3).days) if pd.notna(venc) else None
-                alerta = ""
-                if cr["status"] == "VÁLIDO" and dias is not None:
-                    alerta = "🔴 " if dias <= 7 else ("🟡 " if dias <= 30 else "🟢 ")
+                alerta = _status_dot(cr["status"], dias)
                 rows_cr.append({
                     "":          alerta,
                     "Cliente":   cr.get("cliente_nome","—"),
@@ -663,9 +673,7 @@ if main_tab == "💳 Créditos":
                 saldo = (cr.get("valor_original") or 0) - (cr.get("valor_utilizado") or 0)
                 venc  = pd.to_datetime(cr.get("data_vencimento"), errors="coerce")
                 dias  = int((venc - hoje3).days) if pd.notna(venc) else None
-                alerta = ""
-                if cr["status"] == "VÁLIDO" and dias is not None:
-                    alerta = "🔴" if dias <= 7 else ("🟡" if dias <= 30 else "🟢")
+                alerta = _status_dot(cr["status"], dias)
                 venc_str = venc.strftime("%d/%m/%Y") if pd.notna(venc) else "—"
 
                 rc = st.columns(_col_w)
