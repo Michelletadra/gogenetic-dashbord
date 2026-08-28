@@ -585,17 +585,23 @@ if main_tab == "💳 Créditos":
         if st.session_state.get("_edit_cred_ok"):
             st.success(st.session_state.pop("_edit_cred_ok"))
 
-        # Filter in memory
+        # Filter in memory. Busca por NF/cliente tem prioridade sobre o filtro
+        # de Status — já aconteceu 2x de um crédito EXPIRADO/UTILIZADO existir
+        # mas não aparecer porque o filtro de Status tinha ficado em "VÁLIDO",
+        # dando a impressão de que a busca "não achou" quando na real achava,
+        # só estava escondido pelo outro filtro.
         creds_tab = creditos_all
-        if status_sel:
-            creds_tab = [c for c in creds_tab if c["status"] in status_sel]
-        if cli_id_f:
-            creds_tab = [c for c in creds_tab if c["cliente_id"] == cli_id_f]
         if busca_nf:
             termo = busca_nf.strip().lower()
             creds_tab = [c for c in creds_tab
                          if termo in str(c.get("numero_nf") or "").lower()
                          or termo in str(c.get("cliente_nome") or "").lower()]
+        elif status_sel:
+            creds_tab = [c for c in creds_tab if c["status"] in status_sel]
+        if cli_id_f:
+            creds_tab = [c for c in creds_tab if c["cliente_id"] == cli_id_f]
+        if busca_nf and status_sel and len(status_sel) < 4:
+            st.caption("🔎 Busca ativa — mostrando qualquer status (ignorando o filtro de Status acima).")
 
         if not creds_tab:
             st.info("Nenhum crédito encontrado.")
@@ -943,6 +949,11 @@ if main_tab == "💳 Créditos":
             cli_id_f_consumo = cli_opts_consumo.get(cli_f_consumo) if cli_f_consumo != "Todos" else None
             creds_filtrados = [c for c in creds_validos
                                 if not cli_id_f_consumo or c["cliente_id"] == cli_id_f_consumo]
+            if busca_nf:
+                termo_c = busca_nf.strip().lower()
+                creds_filtrados = [c for c in creds_filtrados
+                                    if termo_c in str(c.get("numero_nf") or "").lower()
+                                    or termo_c in str(c.get("cliente_nome") or "").lower()]
 
             if not creds_filtrados:
                 st.info("Nenhum crédito válido para esse cliente.")
