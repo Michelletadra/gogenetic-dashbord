@@ -220,6 +220,32 @@ def _render_form_consumo(cr, key_suffix=""):
                     st.session_state["_consumo_ok"] = f"✅ Consumo de {brl(v_uso)} registrado!"
                 _clear_and_rerun()
 
+@st.dialog("💸 Registrar consumo")
+def _abrir_dialog_consumo(cr):
+    """Aberto sob demanda (não a cada linha da lista) — antes o formulário
+    inteiro de cada crédito era montado em popover pra TODAS as linhas em
+    todo carregamento de página, o que deixava a Lista lenta com muitos
+    créditos (100+). Com st.dialog só constrói quando alguém clica."""
+    alerta_exp = " ⚠️ EXPIRADO" if cr["status"] == "EXPIRADO" else ""
+    st.caption(f"{cr.get('cliente_nome','?')} — {_nf_label(cr.get('numero_nf'))}{alerta_exp}")
+    _render_form_consumo(cr, key_suffix=f"_dlg_{cr['id']}")
+
+@st.dialog("🗑️ Excluir crédito")
+def _abrir_dialog_excluir(cr):
+    st.caption(f"Excluir crédito de {cr.get('cliente_nome','?')} — {brl(cr.get('valor_original'))}")
+    movs_do_credito = [m for m in movs_all if m.get("credito_id") == cr["id"]]
+    if movs_do_credito:
+        st.warning(
+            f"⚠️ Tem {len(movs_do_credito)} movimentação(ões) registrada(s) — "
+            f"excluir apaga esse histórico junto."
+        )
+    confirma_del = st.checkbox("Confirmo a exclusão", key=f"del_confirm_dlg_{cr['id']}")
+    if st.button("🗑️ Excluir definitivamente", key=f"del_btn_dlg_{cr['id']}",
+                 disabled=not confirma_del, use_container_width=True):
+        delete_credito(cr["id"])
+        st.session_state["_edit_cred_ok"] = f"🗑️ Crédito de {cr.get('cliente_nome','?')} excluído."
+        _clear_and_rerun()
+
 def _attach_nf_control(cr, key_suffix=""):
     """Campo rápido pra anexar (ou trocar) a NF de um crédito, sem precisar
     abrir outra aba. Digitou um número novo -> cria a NF e já vincula."""
@@ -689,28 +715,12 @@ if main_tab == "💳 Créditos":
                 pode_consumir = cr["status"] != "CANCELADO" and saldo > 0
                 with rc[8]:
                     if pode_consumir:
-                        with st.popover("💸"):
-                            alerta_exp = " ⚠️ EXPIRADO" if cr["status"] == "EXPIRADO" else ""
-                            st.caption(f"{cr.get('cliente_nome','?')} — {_nf_label(cr.get('numero_nf'))}{alerta_exp}")
-                            _render_form_consumo(cr, key_suffix=f"_row_{cr['id']}")
+                        if st.button("💸", key=f"btn_consumo_{cr['id']}", help="Registrar consumo"):
+                            _abrir_dialog_consumo(cr)
 
                 with rc[9]:
-                    with st.popover("🗑️"):
-                        st.caption(f"Excluir crédito de {cr.get('cliente_nome','?')} — {brl(cr.get('valor_original'))}")
-                        movs_do_credito = [m for m in movs_all if m.get("credito_id") == cr["id"]]
-                        if movs_do_credito:
-                            st.warning(
-                                f"⚠️ Tem {len(movs_do_credito)} movimentação(ões) registrada(s) — "
-                                f"excluir apaga esse histórico junto."
-                            )
-                        confirma_del = st.checkbox("Confirmo a exclusão", key=f"del_confirm_{cr['id']}")
-                        if st.button("🗑️ Excluir definitivamente", key=f"del_btn_{cr['id']}",
-                                     disabled=not confirma_del, use_container_width=True):
-                            delete_credito(cr["id"])
-                            st.session_state["_edit_cred_ok"] = (
-                                f"🗑️ Crédito de {cr.get('cliente_nome','?')} excluído."
-                            )
-                            _clear_and_rerun()
+                    if st.button("🗑️", key=f"btn_del_{cr['id']}", help="Excluir crédito"):
+                        _abrir_dialog_excluir(cr)
 
             st.markdown("---")
 
