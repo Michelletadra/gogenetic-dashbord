@@ -621,94 +621,12 @@ def _abrir_dialog_del_mov(m):
 
 # ── Tabs principais ───────────────────────────────────────────────────────────
 main_tab = _tabs_persist(
-    ["📊 Painel", "👛 Carteiras", "📑 Relatório Mensal"],
+    ["👛 Carteiras", "📑 Relatório Mensal"],
     key="cred_main_tab",
 )
 
 # ══════════════════════════════════════════════════════════════════════════════
-# TAB 1 — PAINEL
-# ══════════════════════════════════════════════════════════════════════════════
-if main_tab == "📊 Painel":
-    df = pd.DataFrame(creditos_all) if creditos_all else pd.DataFrame()
-
-    if not df.empty:
-        df["valor_original"]  = pd.to_numeric(df["valor_original"],  errors="coerce").fillna(0)
-        df["valor_utilizado"] = pd.to_numeric(df["valor_utilizado"], errors="coerce").fillna(0)
-        df["saldo"]           = df["valor_original"] - df["valor_utilizado"]
-        df["data_vencimento"] = pd.to_datetime(df["data_vencimento"], errors="coerce")
-
-        hoje        = pd.Timestamp.today().normalize()
-        df_validos  = df[df["status"] == "VÁLIDO"]
-        df_expirad  = df[df["status"] == "EXPIRADO"]
-        df_venc30   = df_validos[(df_validos["data_vencimento"] >= hoje) & (df_validos["data_vencimento"] <= hoje + timedelta(days=30))]
-        df_venc7    = df_validos[(df_validos["data_vencimento"] >= hoje) & (df_validos["data_vencimento"] <= hoje + timedelta(days=7))]
-    else:
-        df_validos = df_expirad = df_venc30 = df_venc7 = pd.DataFrame()
-        hoje = pd.Timestamp.today().normalize()
-
-    divergentes_painel = _creditos_divergentes()
-    if divergentes_painel:
-        nomes_div_p = sorted({c.get("cliente_nome", "?") for c in divergentes_painel})
-        st.markdown(f"""
-        <div style='background:#FCEFD9;border-left:4px solid #B4720A;border-radius:8px;
-                    padding:12px 16px;margin-bottom:18px;font-size:.86rem;color:#4B3B1E'>
-          <b>⚠️ {len(divergentes_painel)} crédito(s) com saldo divergente</b> — precisam de um
-          ⚖️ Ajuste documentando a correção. Veja em 👛 Carteiras: {", ".join(nomes_div_p)}.
-        </div>""", unsafe_allow_html=True)
-
-    def _kpi_card(col, label, valor, sub, cor):
-        col.markdown(f"""
-        <div style='background:#fff;border:1px solid #EAE6F4;border-radius:12px;
-                    padding:14px 16px'>
-          <div style='font-size:.68rem;text-transform:uppercase;letter-spacing:1.2px;
-                      color:#8B6BAE;font-weight:700'>{label}</div>
-          <div style='font-family:monospace;font-size:1.35rem;font-weight:700;
-                      color:{cor};margin-top:3px'>{valor}</div>
-          <div style='font-size:.74rem;color:#A899C4;margin-top:2px'>{sub}</div>
-        </div>""", unsafe_allow_html=True)
-
-    k1, k2, k3, k4 = st.columns(4)
-    _kpi_card(k1, "💚 Saldo Válido",  brl(df_validos["saldo"].sum() if not df_validos.empty else 0),
-              f"{len(df_validos)} crédito(s)", "#159A73")
-    _kpi_card(k2, "⚠️ Vencendo 30d", brl(df_venc30["saldo"].sum() if not df_venc30.empty else 0),
-              f"{len(df_venc30)} crédito(s)", "#B4720A")
-    _kpi_card(k3, "🚨 Vencendo 7d",  brl(df_venc7["saldo"].sum() if not df_venc7.empty else 0),
-              f"{len(df_venc7)} crédito(s)", "#D6304A" if not df_venc7.empty else "#6E5A93")
-    _kpi_card(k4, "👥 Clientes",     str(len(clientes_all)), "cadastrados", "#1A1033")
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    # Alertas — mesmo estilo de linha em pill do extrato (👛 Carteiras)
-    def _linha_alerta(row, dias, cor, fundo, label_p):
-        st.markdown(f"""
-        <div style='background:#fff;border:1px solid #EAE6F4;border-radius:10px;
-                    padding:10px 14px;margin-bottom:6px;display:flex;
-                    justify-content:space-between;align-items:center'>
-          <div>
-            <span style='background:{fundo};color:{cor};font-size:.68rem;font-weight:700;
-                        border-radius:20px;padding:2px 9px;margin-right:8px'>{label_p}</span>
-            <b>{row.get('cliente_nome','—')}</b>
-            <span style='color:#8B6BAE;font-size:.82rem;margin-left:8px'>
-              {_nf_label(row.get('numero_nf'))} · {dias} dia{'s' if dias != 1 else ''}
-            </span>
-          </div>
-          <b style='font-family:monospace;color:{cor}'>{brl(row['saldo'])}</b>
-        </div>""", unsafe_allow_html=True)
-
-    if not df_venc7.empty:
-        st.markdown("#### 🚨 Vencendo nos próximos 7 dias")
-        for _, row in df_venc7.iterrows():
-            dias = int((row["data_vencimento"] - hoje).days)
-            _linha_alerta(row, dias, "#D6304A", "#FBE7EA", "Urgente")
-
-    elif not df_venc30.empty:
-        st.markdown("#### ⚠️ Vencendo em até 30 dias")
-        for _, row in df_venc30.iterrows():
-            dias = int((row["data_vencimento"] - hoje).days)
-            _linha_alerta(row, dias, "#B4720A", "#FCEFD9", "Atenção")
-
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 2 — CARTEIRAS
+# TAB 1 — CARTEIRAS
 # ══════════════════════════════════════════════════════════════════════════════
 if main_tab == "👛 Carteiras":
     for _flash_key in ("_wallet_ok", "_ajuste_ok", "_consumo_ok"):
@@ -981,13 +899,13 @@ if main_tab == "👛 Carteiras":
                 st.markdown("<hr style='margin:4px 0;border-color:#EAE6F4'>", unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# TAB 3 — RELATÓRIO MENSAL
+# TAB 2 — RELATÓRIO MENSAL
 # ══════════════════════════════════════════════════════════════════════════════
 if main_tab == "📑 Relatório Mensal":
     from utils import MESES_PT
 
     hoje_r  = date.today()
-    col_a, col_b, col_c = st.columns([2, 2, 4])
+    col_a, col_b = st.columns([1, 1])
     ano_r = col_a.selectbox("Ano", list(range(hoje_r.year, hoje_r.year - 4, -1)), key="rel_ano")
     mes_r = col_b.selectbox("Mês", list(range(1, 13)),
                              format_func=lambda m: MESES_PT[m],
@@ -1000,111 +918,121 @@ if main_tab == "📑 Relatório Mensal":
     fim_s = mes_fim.strftime("%Y-%m-%d")
     mes_label = f"{MESES_PT[mes_r]} {ano_r}"
 
-    st.markdown(f"<br>", unsafe_allow_html=True)
+    st.markdown("<br>", unsafe_allow_html=True)
 
-    # ── Dados do mês ──────────────────────────────────────────────────────────
-    # Movimentações do mês
-    movs_mes = [
-        m for m in movs_all
-        if ini_s <= (m.get("data") or "")[:10] <= fim_s
-    ]
-
-    # Créditos criados no mês (notas emitidas no mês)
-    notas_mes = [
-        n for n in notas_all
-        if ini_s <= (n.get("data_emissao") or "")[:10] <= fim_s
-    ]
-    creds_novos = [
-        c for c in creditos_all
-        if any(n["id"] == c.get("nota_fiscal_id") for n in notas_mes)
-    ]
-
-    # Créditos vencidos no mês
-    creds_vencidos = [
-        c for c in creditos_all
-        if ini_s <= (c.get("data_vencimento") or "")[:10] <= fim_s
-        and c["status"] in ("EXPIRADO", "UTILIZADO")
-    ]
-
-    # Saldo ativo ao fim do mês
-    creds_ativos = [c for c in creditos_all if c["status"] == "VÁLIDO"]
-    saldo_ativo  = sum((c.get("valor_original") or 0) - (c.get("valor_utilizado") or 0)
-                       for c in creds_ativos)
+    # ── Dados do mês ─────────────────────────────────────────────────────────
+    movs_mes = [m for m in movs_all if ini_s <= (m.get("data") or "")[:10] <= fim_s]
+    notas_mes = [n for n in notas_all if ini_s <= (n.get("data_emissao") or "")[:10] <= fim_s]
+    creds_novos = [c for c in creditos_all if any(n["id"] == c.get("nota_fiscal_id") for n in notas_mes)]
 
     total_consumido = sum(float(m.get("valor") or 0) for m in movs_mes
                           if m.get("tipo") in ("UTILIZAÇÃO", "USO"))
-    total_novos     = sum(float(c.get("valor_original") or 0) for c in creds_novos)
+    total_novos = sum(float(c.get("valor_original") or 0) for c in creds_novos)
 
-    # ── KPIs ──────────────────────────────────────────────────────────────────
-    k1, k2, k3, k4 = st.columns(4)
-    def _kpi_r(col, icon, label, val, sub="", cor="#1A0A2E"):
+    # ── Saldo de cada crédito NO FIM do mês selecionado (não "hoje") ───────────
+    # Créditos criados depois do fim do mês não contam; movimentações depois
+    # do fim do mês também não — assim o relatório de um mês passado mostra a
+    # posição REAL daquele momento, não o estado atual do sistema.
+    _movs_por_credito = defaultdict(list)
+    for m in movs_all:
+        _movs_por_credito[m.get("credito_id")].append(m)
+
+    def _saldo_credito_ate(cr, data_limite_s):
+        criado = (cr.get("created_at") or "")[:10]
+        if criado and criado > data_limite_s:
+            return None  # crédito ainda não existia nessa data
+        debito = 0.0
+        for m in _movs_por_credito.get(cr["id"], []):
+            d = (m.get("data") or "")[:10]
+            if not d or d > data_limite_s:
+                continue
+            valor = m.get("valor") or 0
+            debito += -valor if m.get("tipo") == "ESTORNO" else valor
+        return (cr.get("valor_original") or 0) - debito
+
+    _consumo_mes_por_cli = defaultdict(float)
+    for m in movs_mes:
+        if m.get("tipo") in ("UTILIZAÇÃO", "USO"):
+            _consumo_mes_por_cli[m.get("cliente_nome", "")] += float(m.get("valor") or 0)
+
+    _novos_mes_por_cli = defaultdict(float)
+    for c in creds_novos:
+        _novos_mes_por_cli[c.get("cliente_nome", "")] += float(c.get("valor_original") or 0)
+
+    # ── Posição por cliente — saldo no fim do mês, mesmo sem movimento ─────────
+    linhas_posicao = []
+    saldo_fim_total = 0.0
+    for cli in clientes_all:
+        creds_cli = [c for c in creditos_all if c["cliente_id"] == cli["id"]]
+        if not creds_cli:
+            continue
+        saldo_fim = sum((_saldo_credito_ate(c, fim_s) or 0) for c in creds_cli)
+        movimentado = _consumo_mes_por_cli.get(cli["nome"], 0.0)
+        novos = _novos_mes_por_cli.get(cli["nome"], 0.0)
+        if abs(saldo_fim) < 0.005 and abs(movimentado) < 0.005 and abs(novos) < 0.005:
+            continue  # nada a mostrar pra esse cliente nesse mês
+        saldo_fim_total += saldo_fim
+        linhas_posicao.append({
+            "Cliente":               cli["nome"],
+            "Saldo em fim do mês":   saldo_fim,
+            "Movimentado no mês":    movimentado,
+            "Créditos novos no mês": novos,
+        })
+    linhas_posicao.sort(key=lambda r: r["Saldo em fim do mês"], reverse=True)
+
+    # ── KPIs ─────────────────────────────────────────────────────────────────
+    def _kpi_card(col, label, valor, sub, cor):
         col.markdown(f"""
-        <div style='background:#fff;border-radius:12px;padding:16px 20px;
-                    box-shadow:0 2px 8px rgba(126,22,184,0.08)'>
-          <div style='font-size:.72rem;color:#8B6BAE;text-transform:uppercase;letter-spacing:1px'>{icon} {label}</div>
-          <div style='font-size:1.25rem;font-weight:800;color:{cor}'>{val}</div>
-          <div style='font-size:.78rem;color:#6B7280'>{sub}</div>
+        <div style='background:#fff;border:1px solid #EAE6F4;border-radius:12px;
+                    padding:14px 16px'>
+          <div style='font-size:.68rem;text-transform:uppercase;letter-spacing:1.2px;
+                      color:#8B6BAE;font-weight:700'>{label}</div>
+          <div style='font-family:monospace;font-size:1.35rem;font-weight:700;
+                      color:{cor};margin-top:3px'>{valor}</div>
+          <div style='font-size:.74rem;color:#A899C4;margin-top:2px'>{sub}</div>
         </div>""", unsafe_allow_html=True)
 
-    _kpi_r(k1, "💸", f"Consumido em {MESES_PT[mes_r]}", brl(total_consumido),
-           f"{len(movs_mes)} serviço(s)", "#7E16B8")
-    _kpi_r(k2, "➕", "Novos créditos",  brl(total_novos),
-           f"{len(creds_novos)} crédito(s)", "#10B981")
-    _kpi_r(k3, "⏰", "Créditos encerrados", str(len(creds_vencidos)),
-           "vencidos ou utilizados no mês", "#F59E0B")
-    _kpi_r(k4, "💰", "Saldo ativo total", brl(saldo_ativo),
-           f"{len(creds_ativos)} crédito(s) válidos", "#10B981")
+    k1, k2, k3 = st.columns(3)
+    _kpi_card(k1, "💸 Consumido no mês", brl(total_consumido),
+              f"{len(movs_mes)} lançamento(s)", "#D6304A")
+    _kpi_card(k2, "➕ Créditos novos", brl(total_novos),
+              f"{len(creds_novos)} crédito(s)", "#159A73")
+    _kpi_card(k3, f"💰 Saldo total em {mes_fim.strftime('%d/%m')}", brl(saldo_fim_total),
+              f"{len(linhas_posicao)} cliente(s) com posição", "#7E16B8")
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # ── Tabela de consumos do mês ─────────────────────────────────────────────
-    if movs_mes:
-        st.markdown(f"#### 📋 Consumos de {mes_label}")
-
-        df_rel = pd.DataFrame(movs_mes)
-        df_rel["valor"] = pd.to_numeric(df_rel["valor"], errors="coerce").fillna(0)
-        df_rel["data"]  = pd.to_datetime(df_rel["data"], errors="coerce")
-        for col_opt in ["descricao_servico","codigo_servico","qtd_amostras","valor_amostra","responsavel","observacao"]:
-            if col_opt not in df_rel.columns:
-                df_rel[col_opt] = None
-
-        df_rel_show = df_rel.sort_values("data")[
-            ["data","cliente_nome","descricao_servico","codigo_servico",
-             "qtd_amostras","valor_amostra","valor","responsavel","observacao"]
-        ].copy()
-        df_rel_show["data"]          = df_rel_show["data"].dt.strftime("%d/%m/%Y")
-        df_rel_show["valor_amostra"] = df_rel_show["valor_amostra"].apply(
-            lambda v: brl(v) if pd.notna(v) and v else "—")
-        df_rel_show["qtd_amostras"]  = df_rel_show["qtd_amostras"].apply(
-            lambda v: str(int(v)) if pd.notna(v) and v else "—")
-        df_rel_show.columns = ["Data","Cliente","Serviço","Cód.","Amostras",
-                                "Vl/Amostra","Total","Responsável","Obs."]
-        st.dataframe(df_rel_show.fillna("—"), use_container_width=True, hide_index=True)
-
-        # Por cliente
-        st.markdown(f"#### 👥 Consumo por cliente — {mes_label}")
-        por_cli = df_rel.groupby("cliente_nome")["valor"].sum().reset_index()
-        por_cli = por_cli.sort_values("valor", ascending=False)
-        por_cli.columns = ["Cliente", "Total consumido"]
-        por_cli["Total consumido"] = por_cli["Total consumido"].apply(brl)
-        st.dataframe(por_cli, use_container_width=True, hide_index=True)
+    # ── Posição por cliente ──────────────────────────────────────────────────
+    st.markdown(f"#### 👥 Posição por cliente — {mes_label}")
+    if not linhas_posicao:
+        st.info(f"Nenhum cliente com saldo, crédito novo ou consumo em {mes_label}.")
     else:
-        st.info(f"Nenhum consumo registrado em {mes_label}.")
+        df_pos = pd.DataFrame(linhas_posicao)
+        df_pos_show = df_pos.copy()
+        for _col_brl in ["Saldo em fim do mês", "Movimentado no mês", "Créditos novos no mês"]:
+            df_pos_show[_col_brl] = df_pos_show[_col_brl].apply(brl)
+        st.dataframe(df_pos_show, use_container_width=True, hide_index=True)
 
-    if creds_novos:
-        st.markdown(f"#### ➕ Novos créditos em {mes_label}")
-        df_novos = pd.DataFrame(creds_novos)[
-            ["cliente_nome","numero_nf","valor_original","data_vencimento","status"]
-        ].copy()
-        df_novos["valor_original"]  = df_novos["valor_original"].apply(brl)
-        df_novos["data_vencimento"] = pd.to_datetime(df_novos["data_vencimento"], errors="coerce")
-        df_novos["data_vencimento"] = df_novos["data_vencimento"].dt.strftime("%d/%m/%Y").fillna("—")
-        df_novos.columns = ["Cliente","NF","Valor","Vencimento","Status"]
-        st.dataframe(df_novos, use_container_width=True, hide_index=True)
+    # ── Detalhamento (fica escondido — só abre quem precisa) ───────────────────
+    if movs_mes:
+        with st.expander(f"📋 Detalhamento dos consumos de {mes_label} ({len(movs_mes)})"):
+            df_rel = pd.DataFrame(movs_mes)
+            df_rel["valor"] = pd.to_numeric(df_rel["valor"], errors="coerce").fillna(0)
+            df_rel["data"]  = pd.to_datetime(df_rel["data"], errors="coerce")
+            for col_opt in ["descricao_servico", "responsavel", "observacao"]:
+                if col_opt not in df_rel.columns:
+                    df_rel[col_opt] = None
+            df_rel_show = df_rel.sort_values("data")[
+                ["data", "cliente_nome", "descricao_servico", "valor", "responsavel", "observacao"]
+            ].copy()
+            df_rel_show["data"] = df_rel_show["data"].dt.strftime("%d/%m/%Y")
+            df_rel_show.columns = ["Data", "Cliente", "Serviço", "Total", "Responsável", "Obs."]
+            df_rel_show["Total"] = df_rel_show["Total"].apply(brl)
+            st.dataframe(df_rel_show.fillna("—"), use_container_width=True, hide_index=True)
 
-    # ── Geração do Excel ──────────────────────────────────────────────────────
+    # ── Geração do Excel ─────────────────────────────────────────────────────
     def _gerar_excel_relatorio(mes_label: str, movs: list, creds_new: list,
-                                creds_enc: list, creds_atv: list) -> bytes:
+                                posicao: list, saldo_total: float) -> bytes:
         wb = Workbook()
 
         # Paleta
@@ -1113,8 +1041,6 @@ if main_tab == "📑 Relatório Mensal":
         WHITE    = "FFFFFF"
         GREY     = "F5F4FA"
         GREEN    = "D1FAE5"
-        RED      = "FEE2E2"
-        YELLOW   = "FEF3C7"
 
         hdr_font  = Font(name="Arial", bold=True, color=WHITE, size=10)
         hdr_fill  = PatternFill("solid", fgColor=PURPLE)
@@ -1122,7 +1048,6 @@ if main_tab == "📑 Relatório Mensal":
         thin      = Side(style="thin", color="CCCCCC")
         border    = Border(left=thin, right=thin, top=thin, bottom=thin)
         brl_fmt   = '#,##0.00'
-        int_fmt   = '#,##0'
         date_fmt  = 'DD/MM/YYYY'
 
         def _set_header(ws, cols, row=1):
@@ -1146,12 +1071,11 @@ if main_tab == "📑 Relatório Mensal":
                 cell.fill = PatternFill("solid", fgColor=fill_color)
             return cell
 
-        # ── Aba 1: Capa / Resumo ──────────────────────────────────────────────
+        # ── Aba 1: Resumo ────────────────────────────────────────────────────
         ws1 = wb.active
         ws1.title = "Resumo"
 
-        # Título
-        ws1.merge_cells("A1:F1")
+        ws1.merge_cells("A1:D1")
         t = ws1["A1"]
         t.value     = f"RELATÓRIO DE CRÉDITOS — {mes_label.upper()}"
         t.font      = Font(name="Arial", bold=True, color=WHITE, size=14)
@@ -1159,19 +1083,16 @@ if main_tab == "📑 Relatório Mensal":
         t.alignment = Alignment(horizontal="center", vertical="center")
         ws1.row_dimensions[1].height = 40
 
-        ws1.merge_cells("A2:F2")
+        ws1.merge_cells("A2:D2")
         ws1["A2"].value = f"Gerado em {date.today().strftime('%d/%m/%Y')} · Grupo GoGenetic"
         ws1["A2"].font  = Font(name="Arial", size=10, color="888888")
         ws1["A2"].alignment = Alignment(horizontal="center")
         ws1.row_dimensions[2].height = 20
 
-        # KPIs
         kpi_data = [
-            ("Total consumido no mês",   total_consumido, brl_fmt, None),
-            ("Novos créditos",           total_novos,     brl_fmt, GREEN),
-            ("Créditos encerrados",      len(creds_enc),  int_fmt, YELLOW),
-            ("Saldo ativo total",        saldo_ativo,     brl_fmt, GREEN),
-            ("Créditos válidos",         len(creds_atv),  int_fmt, None),
+            ("Total consumido no mês",             total_consumido, brl_fmt, None),
+            ("Novos créditos no mês",               total_novos,     brl_fmt, GREEN),
+            (f"Saldo total em {mes_fim.strftime('%d/%m/%Y')}", saldo_total, brl_fmt, GREEN),
         ]
         ws1.row_dimensions[4].height = 20
         ws1.cell(4, 1, "INDICADORES DO MÊS").font = Font(name="Arial", bold=True, size=10, color=PURPLE)
@@ -1183,7 +1104,6 @@ if main_tab == "📑 Relatório Mensal":
             c1.border = border
             c1.fill   = PatternFill("solid", fgColor=LAVENDER)
             ws1.column_dimensions["A"].width = 32
-
             c2 = ws1.cell(i, 2, val)
             c2.font   = Font(name="Arial", size=9)
             c2.border = border
@@ -1192,167 +1112,89 @@ if main_tab == "📑 Relatório Mensal":
                 c2.fill = PatternFill("solid", fgColor=fc)
             ws1.column_dimensions["B"].width = 20
 
-        # Consumo por cliente
-        row = 11
-        ws1.cell(row, 1, "CONSUMO POR CLIENTE").font = Font(name="Arial", bold=True, size=10, color=PURPLE)
-        row += 1
-
-        _set_header(ws1, [("Cliente", 40), ("Total Consumido (R$)", 22)], row=row)
-        row += 1
-
-        df_pc = pd.DataFrame(movs) if movs else pd.DataFrame(columns=["cliente_nome","valor"])
-        if not df_pc.empty:
-            df_pc["valor"] = pd.to_numeric(df_pc["valor"], errors="coerce").fillna(0)
-            por_cliente = df_pc.groupby("cliente_nome")["valor"].sum().reset_index()
-            por_cliente = por_cliente.sort_values("valor", ascending=False)
-            for _, rrow in por_cliente.iterrows():
-                ws1.row_dimensions[row].height = 18
-                _style_data(ws1, row, 1, rrow["cliente_nome"])
-                _style_data(ws1, row, 2, rrow["valor"], brl_fmt)
-                row += 1
-            # Total
-            ws1.row_dimensions[row].height = 20
-            _style_data(ws1, row, 1, "TOTAL", fill_color=LAVENDER, bold=True)
-            _style_data(ws1, row, 2, por_cliente["valor"].sum(), brl_fmt,
-                        fill_color=LAVENDER, bold=True)
-
-        # ── Aba 2: Consumos detalhados ────────────────────────────────────────
-        ws2 = wb.create_sheet("Consumos Detalhados")
-
-        ws2.merge_cells("A1:J1")
+        # ── Aba 2: Posição por Cliente ───────────────────────────────────────
+        ws2 = wb.create_sheet("Posição por Cliente")
+        ws2.merge_cells("A1:D1")
         t2 = ws2["A1"]
-        t2.value = f"CONSUMOS DETALHADOS — {mes_label.upper()}"
+        t2.value = f"POSIÇÃO POR CLIENTE — {mes_label.upper()}"
         t2.font  = Font(name="Arial", bold=True, color=WHITE, size=12)
         t2.fill  = PatternFill("solid", fgColor=PURPLE)
         t2.alignment = Alignment(horizontal="center", vertical="center")
         ws2.row_dimensions[1].height = 35
 
         cols2 = [
-            ("Data",           12), ("Cliente",         36), ("Serviço",         35),
-            ("Código",         12), ("Amostras",         9), ("Vl/Amostra (R$)", 16),
-            ("Total (R$)",     14), ("Responsável",     20), ("Observação",      30),
+            ("Cliente", 40), (f"Saldo em {mes_fim.strftime('%d/%m/%Y')} (R$)", 22),
+            ("Movimentado no mês (R$)", 22), ("Créditos novos no mês (R$)", 22),
         ]
         _set_header(ws2, cols2, row=2)
-
-        movs_sorted = sorted(movs, key=lambda m: (m.get("data") or ""))
         alt = False
-        for r_idx, m in enumerate(movs_sorted, 3):
+        for r_idx, lin in enumerate(posicao, 3):
             alt = not alt
             fill_c = GREY if alt else WHITE
             ws2.row_dimensions[r_idx].height = 18
-            data_val = None
-            try:
-                data_val = pd.to_datetime(m.get("data")).to_pydatetime() if m.get("data") else None
-            except Exception:
-                pass
-            _style_data(ws2, r_idx, 1, data_val, date_fmt, fill_c)
-            _style_data(ws2, r_idx, 2, m.get("cliente_nome",""), fill_color=fill_c)
-            _style_data(ws2, r_idx, 3, m.get("descricao_servico","") or "—", fill_color=fill_c)
-            _style_data(ws2, r_idx, 4, m.get("codigo_servico","") or "—", fill_color=fill_c)
-            qtd = m.get("qtd_amostras")
-            _style_data(ws2, r_idx, 5, int(qtd) if qtd else None, int_fmt, fill_c)
-            vla = m.get("valor_amostra")
-            _style_data(ws2, r_idx, 6, float(vla) if vla else None, brl_fmt, fill_c)
-            _style_data(ws2, r_idx, 7, float(m.get("valor") or 0), brl_fmt, fill_c)
-            _style_data(ws2, r_idx, 8, m.get("responsavel","") or "—", fill_color=fill_c)
-            _style_data(ws2, r_idx, 9, m.get("observacao","") or "—", fill_color=fill_c)
-
-        # Total
-        if movs_sorted:
-            tot_row = len(movs_sorted) + 3
+            _style_data(ws2, r_idx, 1, lin["Cliente"], fill_color=fill_c)
+            _style_data(ws2, r_idx, 2, lin["Saldo em fim do mês"], brl_fmt, fill_c)
+            _style_data(ws2, r_idx, 3, lin["Movimentado no mês"], brl_fmt, fill_c)
+            _style_data(ws2, r_idx, 4, lin["Créditos novos no mês"], brl_fmt, fill_c)
+        if posicao:
+            tot_row = len(posicao) + 3
             ws2.row_dimensions[tot_row].height = 20
-            ws2.merge_cells(f"A{tot_row}:F{tot_row}")
-            tc = ws2[f"A{tot_row}"]
-            tc.value = "TOTAL DO MÊS"
-            tc.font  = Font(name="Arial", bold=True, size=9)
-            tc.fill  = PatternFill("solid", fgColor=LAVENDER)
-            tc.border = border
-            tv = ws2.cell(tot_row, 7)
-            tv.value  = sum(float(m.get("valor") or 0) for m in movs_sorted)
-            tv.number_format = brl_fmt
-            tv.font   = Font(name="Arial", bold=True, size=9)
-            tv.fill   = PatternFill("solid", fgColor=LAVENDER)
-            tv.border = border
+            _style_data(ws2, tot_row, 1, "TOTAL", fill_color=LAVENDER, bold=True)
+            _style_data(ws2, tot_row, 2, saldo_total, brl_fmt, fill_color=LAVENDER, bold=True)
+            _style_data(ws2, tot_row, 3, sum(l["Movimentado no mês"] for l in posicao),
+                        brl_fmt, fill_color=LAVENDER, bold=True)
+            _style_data(ws2, tot_row, 4, sum(l["Créditos novos no mês"] for l in posicao),
+                        brl_fmt, fill_color=LAVENDER, bold=True)
 
-        # ── Aba 3: Posição dos Créditos ───────────────────────────────────────
-        ws3 = wb.create_sheet("Posição dos Créditos")
-
-        ws3.merge_cells("A1:H1")
+        # ── Aba 3: Consumos Detalhados ───────────────────────────────────────
+        ws3 = wb.create_sheet("Consumos Detalhados")
+        ws3.merge_cells("A1:F1")
         t3 = ws3["A1"]
-        t3.value = f"POSIÇÃO DOS CRÉDITOS — {mes_label.upper()}"
+        t3.value = f"CONSUMOS DETALHADOS — {mes_label.upper()}"
         t3.font  = Font(name="Arial", bold=True, color=WHITE, size=12)
         t3.fill  = PatternFill("solid", fgColor=PURPLE)
         t3.alignment = Alignment(horizontal="center", vertical="center")
         ws3.row_dimensions[1].height = 35
 
         cols3 = [
-            ("Cliente",         36), ("NF",       10), ("Crédito (R$)", 16),
-            ("Utilizado (R$)",  16), ("Saldo (R$)", 16), ("Vencimento",  14),
-            ("Status",          14),
+            ("Data", 12), ("Cliente", 36), ("Serviço", 40),
+            ("Total (R$)", 14), ("Responsável", 20), ("Observação", 30),
         ]
         _set_header(ws3, cols3, row=2)
 
-        status_fills = {
-            "VÁLIDO":    GREEN,
-            "EXPIRADO":  RED,
-            "UTILIZADO": "F3F4F6",
-            "CANCELADO": YELLOW,
-        }
-        creds_sorted = sorted(creditos_all,
-                              key=lambda c: (c.get("status",""), c.get("cliente_nome","")))
+        movs_sorted = sorted(movs, key=lambda m: (m.get("data") or ""))
         alt = False
-        for r_idx, c in enumerate(creds_sorted, 3):
+        for r_idx, m in enumerate(movs_sorted, 3):
             alt = not alt
-            saldo_c = (c.get("valor_original") or 0) - (c.get("valor_utilizado") or 0)
-            st_fill = status_fills.get(c.get("status",""), WHITE)
+            fill_c = GREY if alt else WHITE
             ws3.row_dimensions[r_idx].height = 18
-            _style_data(ws3, r_idx, 1, c.get("cliente_nome",""), fill_color=GREY if alt else WHITE)
-            _style_data(ws3, r_idx, 2, c.get("numero_nf","") or "—", fill_color=GREY if alt else WHITE)
-            _style_data(ws3, r_idx, 3, float(c.get("valor_original") or 0), brl_fmt)
-            _style_data(ws3, r_idx, 4, float(c.get("valor_utilizado") or 0), brl_fmt)
-            _style_data(ws3, r_idx, 5, saldo_c, brl_fmt,
-                        fill_color="D1FAE5" if saldo_c > 0 else "F3F4F6")
-            venc = None
+            data_val = None
             try:
-                venc = pd.to_datetime(c.get("data_vencimento")).to_pydatetime() if c.get("data_vencimento") else None
+                data_val = pd.to_datetime(m.get("data")).to_pydatetime() if m.get("data") else None
             except Exception:
                 pass
-            _style_data(ws3, r_idx, 6, venc, date_fmt)
-            _style_data(ws3, r_idx, 7, c.get("status",""), fill_color=st_fill)
+            _style_data(ws3, r_idx, 1, data_val, date_fmt, fill_c)
+            _style_data(ws3, r_idx, 2, m.get("cliente_nome", ""), fill_color=fill_c)
+            _style_data(ws3, r_idx, 3, m.get("descricao_servico", "") or "—", fill_color=fill_c)
+            _style_data(ws3, r_idx, 4, float(m.get("valor") or 0), brl_fmt, fill_c)
+            _style_data(ws3, r_idx, 5, m.get("responsavel", "") or "—", fill_color=fill_c)
+            _style_data(ws3, r_idx, 6, m.get("observacao", "") or "—", fill_color=fill_c)
 
-        # ── Aba 4: Novos créditos ──────────────────────────────────────────────
-        if creds_new:
-            ws4 = wb.create_sheet("Novos Créditos")
-            ws4.merge_cells("A1:F1")
-            t4 = ws4["A1"]
-            t4.value = f"NOVOS CRÉDITOS — {mes_label.upper()}"
-            t4.font  = Font(name="Arial", bold=True, color=WHITE, size=12)
-            t4.fill  = PatternFill("solid", fgColor=PURPLE)
-            t4.alignment = Alignment(horizontal="center", vertical="center")
-            ws4.row_dimensions[1].height = 35
-
-            cols4 = [
-                ("Cliente", 36), ("NF", 10), ("Valor (R$)", 16),
-                ("Emissão", 14), ("Vencimento", 14), ("Status", 14),
-            ]
-            _set_header(ws4, cols4, row=2)
-            for r_idx, c in enumerate(creds_new, 3):
-                ws4.row_dimensions[r_idx].height = 18
-                em = None
-                vc = None
-                try:
-                    nota_c = next((n for n in notas_all if n["id"] == c.get("nota_fiscal_id")), {})
-                    em = pd.to_datetime(nota_c.get("data_emissao")).to_pydatetime() if nota_c.get("data_emissao") else None
-                    vc = pd.to_datetime(c.get("data_vencimento")).to_pydatetime() if c.get("data_vencimento") else None
-                except Exception:
-                    pass
-                _style_data(ws4, r_idx, 1, c.get("cliente_nome",""))
-                _style_data(ws4, r_idx, 2, c.get("numero_nf","") or "—")
-                _style_data(ws4, r_idx, 3, float(c.get("valor_original") or 0), brl_fmt)
-                _style_data(ws4, r_idx, 4, em, date_fmt)
-                _style_data(ws4, r_idx, 5, vc, date_fmt)
-                _style_data(ws4, r_idx, 6, c.get("status",""),
-                            fill_color=status_fills.get(c.get("status",""), WHITE))
+        if movs_sorted:
+            tot_row = len(movs_sorted) + 3
+            ws3.row_dimensions[tot_row].height = 20
+            ws3.merge_cells(f"A{tot_row}:C{tot_row}")
+            tc = ws3[f"A{tot_row}"]
+            tc.value  = "TOTAL DO MÊS"
+            tc.font   = Font(name="Arial", bold=True, size=9)
+            tc.fill   = PatternFill("solid", fgColor=LAVENDER)
+            tc.border = border
+            tv = ws3.cell(tot_row, 4)
+            tv.value  = sum(float(m.get("valor") or 0) for m in movs_sorted)
+            tv.number_format = brl_fmt
+            tv.font   = Font(name="Arial", bold=True, size=9)
+            tv.fill   = PatternFill("solid", fgColor=LAVENDER)
+            tv.border = border
 
         buf = io.BytesIO()
         wb.save(buf)
@@ -1366,7 +1208,7 @@ if main_tab == "📑 Relatório Mensal":
                       use_container_width=True, key="btn_gerar_rel"):
         with st.spinner("Gerando Excel…"):
             st.session_state[_rel_key] = _gerar_excel_relatorio(
-                mes_label, movs_mes, creds_novos, creds_vencidos, creds_ativos
+                mes_label, movs_mes, creds_novos, linhas_posicao, saldo_fim_total
             )
 
     if _rel_key in st.session_state:
