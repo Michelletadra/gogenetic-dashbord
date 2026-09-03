@@ -107,60 +107,63 @@ with tab_painel:
           <div style='font-size:.74rem;color:#A899C4;margin-top:2px'>{sub}</div>
         </div>""", unsafe_allow_html=True)
 
-    k = st.columns(6)
-    _kpi(k[0],"📑","Ativos",         str(res["qtd_ativos"]),             "contratos","#7E16B8")
-    _kpi(k[1],"🔴","Venc. 30d",      str(res["qtd_vencendo_30"]),        "contratos","#EF4444" if res["qtd_vencendo_30"] else "#6B7280")
-    _kpi(k[2],"🟠","Venc. 60d",      str(res["qtd_vencendo_60"]),        "contratos","#F97316" if res["qtd_vencendo_60"] else "#6B7280")
-    _kpi(k[3],"🟡","Venc. 90d",      str(res["qtd_vencendo_90"]),        "contratos","#F59E0B" if res["qtd_vencendo_90"] else "#6B7280")
-    _kpi(k[4],"⚠️","Vencidos",       str(res["qtd_vencidos"]),           "contratos","#EF4444" if res["qtd_vencidos"] else "#6B7280")
-    _kpi(k[5],"⚪","Encerrados",      str(res["qtd_encerrados"]),         "histórico","#6B7280")
+    k = st.columns(5)
+    _kpi(k[0],"📑","Ativos",       str(res["qtd_ativos"]),        "contratos","#7E16B8")
+    _kpi(k[1],"💰","Valor Ativos", brl(res["valor_total_ativo"]), "total","#10B981")
+    _kpi(k[2],"⏰","Vencendo",     str(res["qtd_vencendo_30"]),   "nos próximos 30 dias","#EF4444" if res["qtd_vencendo_30"] else "#6B7280")
+    _kpi(k[3],"⚠️","Vencidos",     str(res["qtd_vencidos"]),      "precisam de ação","#EF4444" if res["qtd_vencidos"] else "#6B7280")
+    _kpi(k[4],"⚪","Encerrados",   str(res["qtd_encerrados"]),    "histórico","#6B7280")
 
-    st.markdown("<br>", unsafe_allow_html=True)
-    k2 = st.columns(5)
-    _kpi(k2[0],"💰","Valor Ativos",   brl(res["valor_total_ativo"]),      "total","#10B981")
-    _kpi(k2[1],"🌍","Internacionais", str(res["qtd_internacionais"]),     "contratos","#3B82F6")
-    _kpi(k2[2],"🏷️","White Label",   str(res["qtd_white_label"]),        "contratos","#8B5CF6")
-    _kpi(k2[3],"♻️","Renov. Auto",   str(res["qtd_renovacao_auto"]),     "contratos","#10B981")
-    _kpi(k2[4],"🔄","Recorrentes",   str(res["qtd_recorrentes"]),        "contratos","#7E16B8")
+    st.caption(
+        f"🌍 {res['qtd_internacionais']} internacionais &nbsp;·&nbsp; "
+        f"🏷️ {res['qtd_white_label']} white label &nbsp;·&nbsp; "
+        f"♻️ {res['qtd_renovacao_auto']} renovação automática &nbsp;·&nbsp; "
+        f"🔄 {res['qtd_recorrentes']} recorrentes",
+        unsafe_allow_html=True,
+    )
 
-    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("<div style='margin-top:18px'></div>", unsafe_allow_html=True)
 
-    # ── Alertas ───────────────────────────────────────────────────────────────
-    urgentes = [c for c in todos if c["status_real"] in ("VENCENDO 30D","VENCIDO")]
+    # ── Vencimentos ───────────────────────────────────────────────────────────
+    def _card_vencimento(ct, cor, bg, msg):
+        st.markdown(f"""
+        <div style='background:{bg};border-left:4px solid {cor};border-radius:8px;
+                    padding:10px 16px;margin-bottom:6px;display:flex;justify-content:space-between'>
+          <div><b>{ct['contratante']}</b>
+            <span style='color:#8B6BAE;font-size:.82rem;margin-left:8px'>
+              {ct['empresa_gg']} · {ct.get('tipo_contrato','—')} · {msg}
+            </span></div>
+          <span>{flag_icons(ct)}</span>
+        </div>""", unsafe_allow_html=True)
+
+    urgentes = sorted(
+        [c for c in todos if c["status_real"] in ("VENCENDO 30D","VENCIDO")],
+        key=lambda c: dias_ate(c.get("data_termino")) or 0,
+    )
+    prox_60_90 = sorted(
+        [c for c in todos if c["status_real"] in ("VENCENDO 60D","VENCENDO 90D")],
+        key=lambda c: dias_ate(c.get("data_termino")) or 0,
+    )
+
     if urgentes:
-        st.markdown("#### 🚨 Atenção imediata")
+        st.markdown("#### 🚨 Precisa de atenção")
         for ct in urgentes:
             dias = dias_ate(ct.get("data_termino"))
-            cor  = "#EF4444"
-            msg  = f"Vencido há {abs(dias)} dia{'s' if abs(dias)!=1 else ''}" if dias and dias < 0 \
-                   else f"Vence em {dias} dia{'s' if dias!=1 else ''}"
             dt   = pd.to_datetime(ct.get("data_termino")).strftime("%d/%m/%Y") if ct.get("data_termino") else "—"
-            st.markdown(f"""
-            <div style='background:#FFF5F5;border-left:4px solid {cor};border-radius:8px;
-                        padding:10px 16px;margin-bottom:6px;display:flex;justify-content:space-between'>
-              <div><b>{ct['contratante']}</b>
-                <span style='color:#8B6BAE;font-size:.82rem;margin-left:8px'>
-                  {ct['empresa_gg']} · {ct.get('tipo_contrato','—')} · {msg} ({dt})
-                </span></div>
-              <span>{flag_icons(ct)}</span>
-            </div>""", unsafe_allow_html=True)
+            msg  = (f"Vencido há {abs(dias)} dia{'s' if abs(dias)!=1 else ''} ({dt})" if dias and dias < 0
+                    else f"Vence em {dias} dia{'s' if dias!=1 else ''} ({dt})")
+            _card_vencimento(ct, "#EF4444", "#FFF5F5", msg)
+    else:
+        st.success("✅ Nenhum contrato vencido ou vencendo nos próximos 30 dias.")
 
-    prox = [c for c in todos if c["status_real"] in ("VENCENDO 60D","VENCENDO 90D")]
-    if prox:
-        st.markdown("#### ⚠️ Próximos vencimentos (60–90 dias)")
-        for ct in prox:
-            dias = dias_ate(ct.get("data_termino"))
-            cor  = "#F59E0B"
-            dt   = pd.to_datetime(ct.get("data_termino")).strftime("%d/%m/%Y") if ct.get("data_termino") else "—"
-            st.markdown(f"""
-            <div style='background:#FFFBEB;border-left:4px solid {cor};border-radius:8px;
-                        padding:10px 16px;margin-bottom:6px;display:flex;justify-content:space-between'>
-              <div><b>{ct['contratante']}</b>
-                <span style='color:#8B6BAE;font-size:.82rem;margin-left:8px'>
-                  {ct['empresa_gg']} · {dias}d ({dt})
-                </span></div>
-              <span>{flag_icons(ct)}</span>
-            </div>""", unsafe_allow_html=True)
+    if prox_60_90:
+        with st.expander(f"📅 Vencendo em 60–90 dias ({len(prox_60_90)})"):
+            for ct in prox_60_90:
+                dias = dias_ate(ct.get("data_termino"))
+                dt   = pd.to_datetime(ct.get("data_termino")).strftime("%d/%m/%Y") if ct.get("data_termino") else "—"
+                _card_vencimento(ct, "#F59E0B", "#FFFBEB", f"{dias}d ({dt})")
+
+    st.markdown("<div style='margin-top:18px'></div>", unsafe_allow_html=True)
 
     # ── Gráficos ──────────────────────────────────────────────────────────────
     ativos_df = pd.DataFrame([c for c in todos if c["status_real"] not in ("ENCERRADO","RESCINDIDO")])
