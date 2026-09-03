@@ -98,11 +98,13 @@ with tab_painel:
     # ── KPIs linha 1 ──────────────────────────────────────────────────────────
     def _kpi(col, icon, label, valor, sub="", cor="#1A0A2E"):
         col.markdown(f"""
-        <div style='background:#fff;border-radius:12px;padding:14px 18px;
-                    box-shadow:0 2px 8px rgba(126,22,184,0.08)'>
-          <div style='font-size:.68rem;color:#8B6BAE;text-transform:uppercase;letter-spacing:1px'>{icon} {label}</div>
-          <div style='font-size:1.25rem;font-weight:800;color:{cor}'>{valor}</div>
-          <div style='font-size:.75rem;color:#6B7280'>{sub}</div>
+        <div style='background:#fff;border:1px solid #EAE6F4;border-radius:12px;
+                    padding:14px 16px'>
+          <div style='font-size:.68rem;text-transform:uppercase;letter-spacing:1.2px;
+                      color:#8B6BAE;font-weight:700'>{icon} {label}</div>
+          <div style='font-family:monospace;font-size:1.25rem;font-weight:700;
+                      color:{cor};margin-top:3px'>{valor}</div>
+          <div style='font-size:.74rem;color:#A899C4;margin-top:2px'>{sub}</div>
         </div>""", unsafe_allow_html=True)
 
     k = st.columns(6)
@@ -245,7 +247,21 @@ with tab_lista:
         dias = dias_ate(ct.get("data_termino"))
         dt   = pd.to_datetime(ct["data_termino"]).strftime("%d/%m/%Y") if ct.get("data_termino") else "—"
         vt   = brl(ct["valor_total"]) if ct.get("valor_total") else "—"
-        st.caption(f"{ct['contratante']} · {ct.get('tipo_contrato','—')} · {sr} {flag_icons(ct)}")
+
+        hcol1, hcol2 = st.columns([2.2, 1])
+        with hcol1:
+            st.markdown(f"### {ct['contratante']}")
+            st.caption(f"{ct.get('tipo_contrato','—')} · {ct.get('empresa_gg','—')}")
+        with hcol2:
+            st.markdown(f"""
+            <div style='text-align:right'>
+              <div style='font-size:.7rem;text-transform:uppercase;letter-spacing:1px;color:#8B6BAE'>
+                Valor total</div>
+              <div style='font-family:monospace;font-size:1.4rem;font-weight:800;color:#1A0A2E'>{vt}</div>
+            </div>""", unsafe_allow_html=True)
+        st.markdown(f"{status_badge(sr)} &nbsp; {flag_icons(ct)}", unsafe_allow_html=True)
+        st.markdown("<hr style='margin:10px 0;border-color:#EAE6F4'>", unsafe_allow_html=True)
+
         c1, c2, c3, c4 = st.columns(4)
         c1.markdown(f"**Tipo:** {ct.get('tipo_contrato','—')}")
         c1.markdown(f"**Categoria:** {ct.get('categoria','—')}")
@@ -255,7 +271,6 @@ with tab_lista:
         if dias is not None:
             c2.markdown(f"**Dias restantes:** {'**'+str(dias)+'**' if dias >= 0 else f'⚠️ {abs(dias)}d vencido'}")
         c2.markdown(f"**Status:** {sr}")
-        c3.markdown(f"**Valor total:** {vt}")
         if ct.get("valor_recorrente"):   c3.markdown(f"**Recorrente:** {brl(ct['valor_recorrente'])}/ano")
         if ct.get("valor_por_amostra"):  c3.markdown(f"**Por amostra:** {brl(ct['valor_por_amostra'])}")
         if ct.get("comissao_percentual"): c3.markdown(f"**Comissão:** {ct['comissao_percentual']}%")
@@ -343,16 +358,27 @@ with tab_lista:
                 unsafe_allow_html=True,
             )
             for ct in contratos_emp:
-                sr   = ct["status_real"]
+                sr    = ct["status_real"]
                 flags = flag_icons(ct)
-                lcol1, lcol2 = st.columns([6, 1])
-                with lcol1:
-                    st.markdown(
-                        f"**{ct['contratante']}**  ·  {ct.get('tipo_contrato','—')}  ·  {sr}  {flags}"
-                    )
-                if lcol2.button("Ver detalhes", key=f"ver_{tab_key}_{ct['id']}", use_container_width=True):
+                dt    = pd.to_datetime(ct["data_termino"]).strftime("%d/%m/%Y") if ct.get("data_termino") else "—"
+                sub_bits = [ct.get("tipo_contrato","—"), f"vence {dt}"]
+                if flags:
+                    sub_bits.append(flags)
+                st.markdown(f"""
+                <div style='background:#fff;border:1px solid #EAE6F4;border-radius:12px;
+                            padding:12px 16px;margin-bottom:6px'>
+                  <div style='display:flex;justify-content:space-between;align-items:flex-start;gap:10px'>
+                    <div>
+                      <div style='font-size:.88rem;font-weight:700'>{ct['contratante']}</div>
+                      <div style='font-size:.72rem;color:#8B6BAE;margin-top:3px'>{' · '.join(sub_bits)}</div>
+                    </div>
+                    <div>{status_badge(sr)}</div>
+                  </div>
+                </div>""", unsafe_allow_html=True)
+                bcol, _ = st.columns([1, 4])
+                if bcol.button("Ver detalhes", key=f"ver_{tab_key}_{ct['id']}", use_container_width=True):
                     _abrir_dialog_contrato(ct, tab_key)
-                st.markdown("<hr style='margin:4px 0;border-color:#EAE6F4'>", unsafe_allow_html=True)
+                st.markdown("<div style='margin-bottom:10px'></div>", unsafe_allow_html=True)
 
     stab_at, stab_venc, stab_enc = st.tabs([
         f"✅ Ativos ({len(ct_ativos)})",
