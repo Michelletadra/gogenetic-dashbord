@@ -646,54 +646,66 @@ if main_tab == "📊 Painel":
         df_validos = df_expirad = df_venc30 = df_venc7 = pd.DataFrame()
         hoje = pd.Timestamp.today().normalize()
 
-    k1, k2, k3, k4 = st.columns(4)
-    def _kpi(col, icon, label, valor, sub="", cor="#1A0A2E"):
-        col.markdown(f"""
-        <div style='background:#fff;border-radius:12px;padding:16px 20px;
-                    box-shadow:0 2px 8px rgba(126,22,184,0.08)'>
-          <div style='font-size:.72rem;color:#8B6BAE;text-transform:uppercase;letter-spacing:1px'>{icon} {label}</div>
-          <div style='font-size:1.3rem;font-weight:800;color:{cor}'>{valor}</div>
-          <div style='font-size:.78rem;color:#6B7280'>{sub}</div>
+    divergentes_painel = _creditos_divergentes()
+    if divergentes_painel:
+        nomes_div_p = sorted({c.get("cliente_nome", "?") for c in divergentes_painel})
+        st.markdown(f"""
+        <div style='background:#FCEFD9;border-left:4px solid #B4720A;border-radius:8px;
+                    padding:12px 16px;margin-bottom:18px;font-size:.86rem;color:#4B3B1E'>
+          <b>⚠️ {len(divergentes_painel)} crédito(s) com saldo divergente</b> — precisam de um
+          ⚖️ Ajuste documentando a correção. Veja em 👛 Carteiras: {", ".join(nomes_div_p)}.
         </div>""", unsafe_allow_html=True)
 
-    _kpi(k1,"💚","Saldo Válido",   brl(df_validos["saldo"].sum() if not df_validos.empty else 0),
-         f"{len(df_validos)} crédito(s)", "#10B981")
-    _kpi(k2,"⚠️","Vencendo 30d",  brl(df_venc30["saldo"].sum() if not df_venc30.empty else 0),
-         f"{len(df_venc30)} crédito(s)", "#F59E0B")
-    _kpi(k3,"🚨","Vencendo 7d",   brl(df_venc7["saldo"].sum() if not df_venc7.empty else 0),
-         f"{len(df_venc7)} crédito(s)", "#EF4444" if not df_venc7.empty else "#6B7280")
-    _kpi(k4,"👥","Clientes",      str(len(clientes_all)), "cadastrados")
+    def _kpi_card(col, label, valor, sub, cor):
+        col.markdown(f"""
+        <div style='background:#fff;border:1px solid #EAE6F4;border-radius:12px;
+                    padding:14px 16px'>
+          <div style='font-size:.68rem;text-transform:uppercase;letter-spacing:1.2px;
+                      color:#8B6BAE;font-weight:700'>{label}</div>
+          <div style='font-family:monospace;font-size:1.35rem;font-weight:700;
+                      color:{cor};margin-top:3px'>{valor}</div>
+          <div style='font-size:.74rem;color:#A899C4;margin-top:2px'>{sub}</div>
+        </div>""", unsafe_allow_html=True)
+
+    k1, k2, k3, k4 = st.columns(4)
+    _kpi_card(k1, "💚 Saldo Válido",  brl(df_validos["saldo"].sum() if not df_validos.empty else 0),
+              f"{len(df_validos)} crédito(s)", "#159A73")
+    _kpi_card(k2, "⚠️ Vencendo 30d", brl(df_venc30["saldo"].sum() if not df_venc30.empty else 0),
+              f"{len(df_venc30)} crédito(s)", "#B4720A")
+    _kpi_card(k3, "🚨 Vencendo 7d",  brl(df_venc7["saldo"].sum() if not df_venc7.empty else 0),
+              f"{len(df_venc7)} crédito(s)", "#D6304A" if not df_venc7.empty else "#6E5A93")
+    _kpi_card(k4, "👥 Clientes",     str(len(clientes_all)), "cadastrados", "#1A1033")
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # Alertas
+    # Alertas — mesmo estilo de linha em pill do extrato (👛 Carteiras)
+    def _linha_alerta(row, dias, cor, fundo, label_p):
+        st.markdown(f"""
+        <div style='background:#fff;border:1px solid #EAE6F4;border-radius:10px;
+                    padding:10px 14px;margin-bottom:6px;display:flex;
+                    justify-content:space-between;align-items:center'>
+          <div>
+            <span style='background:{fundo};color:{cor};font-size:.68rem;font-weight:700;
+                        border-radius:20px;padding:2px 9px;margin-right:8px'>{label_p}</span>
+            <b>{row.get('cliente_nome','—')}</b>
+            <span style='color:#8B6BAE;font-size:.82rem;margin-left:8px'>
+              {_nf_label(row.get('numero_nf'))} · {dias} dia{'s' if dias != 1 else ''}
+            </span>
+          </div>
+          <b style='font-family:monospace;color:{cor}'>{brl(row['saldo'])}</b>
+        </div>""", unsafe_allow_html=True)
+
     if not df_venc7.empty:
         st.markdown("#### 🚨 Vencendo nos próximos 7 dias")
         for _, row in df_venc7.iterrows():
             dias = int((row["data_vencimento"] - hoje).days)
-            st.markdown(f"""
-            <div style='background:#FFF5F5;border-left:4px solid #EF4444;border-radius:8px;
-                        padding:10px 16px;margin-bottom:6px;display:flex;justify-content:space-between'>
-              <div><b>{row.get('cliente_nome','—')}</b>
-                <span style='color:#8B6BAE;font-size:.85rem;margin-left:10px'>
-                  {_nf_label(row.get('numero_nf'))} · Vence em {dias} dia{'s' if dias != 1 else ''}
-                </span></div>
-              <b style='color:#EF4444'>{brl(row['saldo'])}</b>
-            </div>""", unsafe_allow_html=True)
+            _linha_alerta(row, dias, "#D6304A", "#FBE7EA", "Urgente")
 
     elif not df_venc30.empty:
         st.markdown("#### ⚠️ Vencendo em até 30 dias")
         for _, row in df_venc30.iterrows():
             dias = int((row["data_vencimento"] - hoje).days)
-            st.markdown(f"""
-            <div style='background:#FFFBEB;border-left:4px solid #F59E0B;border-radius:8px;
-                        padding:10px 16px;margin-bottom:6px;display:flex;justify-content:space-between'>
-              <div><b>{row.get('cliente_nome','—')}</b>
-                <span style='color:#8B6BAE;font-size:.85rem;margin-left:10px'>
-                  {_nf_label(row.get('numero_nf'))} · {dias} dias
-                </span></div>
-              <b style='color:#F59E0B'>{brl(row['saldo'])}</b>
-            </div>""", unsafe_allow_html=True)
+            _linha_alerta(row, dias, "#B4720A", "#FCEFD9", "Atenção")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 2 — CARTEIRAS
