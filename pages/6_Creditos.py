@@ -28,6 +28,29 @@ st.markdown("""
 <p class="page-sub">Gestão completa de créditos · Grupo GoGenetic</p>
 """, unsafe_allow_html=True)
 
+# ── Clientes em revisão ─────────────────────────────────────────────────────
+# Clientes nesta lista ficam escondidos das telas normais (Carteiras e
+# Relatório Mensal) — nada é apagado do banco, é só um filtro de exibição.
+# Pra reativar um cliente, tire o trecho da lista abaixo e publique de novo.
+#
+# O match é por SUBSTRING, sem acento e sem diferenciar maiúscula/minúscula,
+# porque o nome cadastrado no banco costuma ser a razão social completa (ex:
+# "BS DIAGNOSTICA COMERCIAL DE PRODUTOS PARA LABORATORIO LTDA"), não o nome
+# curto usado no dia a dia.
+import unicodedata as _unicodedata
+
+def _normalizar_nome(txt: str) -> str:
+    txt = _unicodedata.normalize("NFKD", txt or "")
+    return "".join(c for c in txt if not _unicodedata.combining(c)).strip().lower()
+
+CLIENTES_EM_REVISAO = [
+    "bs diagnostica",  # 2026-09-03 — em revisão de contrato (pedido da Michelle)
+]
+
+def _em_revisao(nome: str) -> bool:
+    n = _normalizar_nome(nome)
+    return any(alvo in n for alvo in CLIENTES_EM_REVISAO)
+
 # ── Carrega TUDO + constrói índices dentro do cache (executado UMA vez) ───────
 @st.cache_data(ttl=600, show_spinner="⏳ Carregando créditos…")
 def _load_all():
@@ -157,6 +180,10 @@ _nota_by_cli = _data["nota_by_cli"]
 _mov_by_cli  = _data["mov_by_cli"]
 _cred_to_cli = _data["cred_to_cli"]
 _cred_map    = _data["cred_map"]
+
+# IDs dos clientes em revisão — calculado uma vez, usado em Carteiras e no
+# Relatório Mensal pra filtrar essas telas sem tocar em nada no banco.
+_ids_em_revisao = {c["id"] for c in clientes_all if _em_revisao(c.get("nome"))}
 
 def _get_cont_by_cli():
     return _load_contratos()
@@ -406,7 +433,8 @@ def _credito_precisa_conciliar(cr, ja_ajustados: set = None) -> bool:
 
 def _creditos_divergentes() -> list:
     ja_ajustados = _creditos_ja_ajustados()
-    return [c for c in creditos_all if _credito_precisa_conciliar(c, ja_ajustados)]
+    return [c for c in creditos_all if _credito_precisa_conciliar(c, ja_ajustados)
+            and c.get("cliente_id") not in _ids_em_revisao]
 
 def _parse_valor_signed(texto: str):
     """Como _parse_valor, mas aceita '-' na frente pra ajustes que devolvem
@@ -683,6 +711,11 @@ if main_tab == "👛 Carteiras":
     else:
         lista = clientes_all
 
+    _qtd_ocultos = sum(1 for c in lista if c["id"] in _ids_em_revisao)
+    lista = [c for c in lista if c["id"] not in _ids_em_revisao]
+    if _qtd_ocultos:
+        st.caption(f"ℹ️ {_qtd_ocultos} cliente(s) em revisão de contrato não exibido(s) aqui.")
+
     if not lista:
         st.info("Nenhum cliente encontrado.")
     else:
@@ -921,9 +954,13 @@ if main_tab == "📑 Relatório Mensal":
     st.markdown("<br>", unsafe_allow_html=True)
 
     # ── Dados do mês ─────────────────────────────────────────────────────────
-    movs_mes = [m for m in movs_all if ini_s <= (m.get("data") or "")[:10] <= fim_s]
-    notas_mes = [n for n in notas_all if ini_s <= (n.get("data_emissao") or "")[:10] <= fim_s]
-    creds_novos = [c for c in creditos_all if any(n["id"] == c.get("nota_fiscal_id") for n in notas_mes)]
+    # (clientes em revisão ficam de fora daqui também — ver CLIENTES_EM_REVISAO)
+    movs_mes = [m for m in movs_all if ini_s <= (m.get("data") or "")[:10] <= fim_s
+                and _cred_to_cli.get(m.get("credito_id")) not in _ids_em_revisao]
+    notas_mes = [n for n in notas_all if ini_s <= (n.get("data_emissao") or "")[:10] <= fim_s
+                 and n.get("cliente_id") not in _ids_em_revisao]
+    creds_novos = [c for c in creditos_all if any(n["id"] == c.get("nota_fiscal_id") for n in notas_mes)
+                   and c.get("cliente_id") not in _ids_em_revisao]
 
     total_consumido = sum(float(m.get("valor") or 0) for m in movs_mes
                           if m.get("tipo") in ("UTILIZAÇÃO", "USO"))
@@ -963,6 +1000,8 @@ if main_tab == "📑 Relatório Mensal":
     linhas_posicao = []
     saldo_fim_total = 0.0
     for cli in clientes_all:
+        if cli["id"] in _ids_em_revisao:
+            continue
         creds_cli = [c for c in creditos_all if c["cliente_id"] == cli["id"]]
         if not creds_cli:
             continue
