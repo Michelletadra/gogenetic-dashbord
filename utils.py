@@ -597,8 +597,17 @@ def load_bling_vencidas() -> dict:
 
 # ── Helpers unificados (eGestor + Bling) ──────────────────────────────────────
 
+@st.cache_data(ttl=120, show_spinner=False)
 def get_empresas_disponiveis() -> list:
-    """Retorna a lista de empresas disponíveis: sempre eGestor + Bling se conectado."""
+    """Retorna a lista de empresas disponíveis: sempre eGestor + Bling se conectado.
+
+    Cacheado por 2min — is_connected() faz uma chamada de rede real (GET na
+    API do Bling, com retry+sleep em 429) e essa função era chamada sem cache
+    em TODA página com filtro de empresa (Faturamento, Vendas, Contas, Mensal,
+    Fluxo, Realizado) — ou seja, em toda interação do usuário nessas 6 páginas
+    (qualquer widget, não só o botão de refresh). Sem cache, o pior caso é uma
+    chamada de ~15s (timeout) + 2 retries de 3s cada, TODA vez. Como o botão
+    "🔄 Atualizar dados" já chama st.cache_data.clear(), ele também limpa isso."""
     try:
         import bling_auth
         if bling_auth.is_connected():
