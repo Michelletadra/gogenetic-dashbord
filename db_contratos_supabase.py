@@ -117,9 +117,14 @@ def delete_contrato(id):
     _sb().table("contratos").delete().eq("id", id).execute()
 
 # ── Parcelas ──────────────────────────────────────────────────────────────────
-def list_parcelas(contrato_id):
-    return _sb().table("contrato_parcelas").select("*") \
-                .eq("contrato_id", contrato_id).order("numero").execute().data
+def list_parcelas(contrato_id=None):
+    """contrato_id=None carrega TODAS as parcelas de uma vez (usado pra montar
+    um indice em memoria na pagina de Contratos, em vez de 1 consulta por
+    contrato — ver pages/7_Contratos.py)."""
+    q = _sb().table("contrato_parcelas").select("*")
+    if contrato_id is not None:
+        q = q.eq("contrato_id", contrato_id)
+    return q.order("numero").execute().data
 
 def insert_parcela(data) -> int:
     d = {k: v for k, v in data.items() if k not in ("id", "created_at")}

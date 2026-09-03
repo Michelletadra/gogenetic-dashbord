@@ -220,13 +220,115 @@ with tab_lista:
     ct_vencidos  = [c for c in todos_ct if c["status_real"] in _VENCIDOS_SR]
     ct_encerrados = [c for c in todos_ct if c["status_real"] in _ENCERR_SR]
 
+    # ── Carrega parcelas e créditos de TODOS os contratos de uma vez só ────────
+    # (antes: list_parcelas(ct["id"]) e list_creditos(contrato_id=ct["id"]) eram
+    # chamados um por contrato, dentro de st.expander — que NÃO é lazy no
+    # Streamlit, monta o conteúdo de todo mundo a cada rerun mesmo fechado. Com
+    # muitos contratos isso significava 2 consultas extras no banco por
+    # contrato, em TODA interação na página. Agora é 2 consultas no total,
+    # indexadas em memória — mesma técnica usada em Créditos.)
+    from collections import defaultdict
+    _parcelas_by_ct  = defaultdict(list)
+    for p in list_parcelas():
+        _parcelas_by_ct[p.get("contrato_id")].append(p)
+    _creditos_by_ct = defaultdict(list)
+    try:
+        for cr in list_creditos():
+            if cr.get("contrato_id"):
+                _creditos_by_ct[cr["contrato_id"]].append(cr)
+    except Exception:
+        pass
+
+    @st.dialog("📄 Detalhes do contrato")
+    def _abrir_dialog_contrato(ct, tab_key):
+        sr = ct["status_real"]
+        dias = dias_ate(ct.get("data_termino"))
+        dt   = pd.to_datetime(ct["data_termino"]).strftime("%d/%m/%Y") if ct.get("data_termino") else "—"
+        vt   = brl(ct["valor_total"]) if ct.get("valor_total") else "—"
+        st.caption(f"{ct['contratante']} · {ct.get('tipo_contrato','—')} · {sr} {flag_icons(ct)}")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.markdown(f"**Tipo:** {ct.get('tipo_contrato','—')}")
+        c1.markdown(f"**Categoria:** {ct.get('categoria','—')}")
+        c1.markdown(f"**Serviço:** {ct.get('servico_principal','—')}")
+        c2.markdown(f"**Vencimento:** {dt}")
+        c2.markdown(f"**Assinatura:** {ct.get('data_assinatura','—') or '—'}")
+        if dias is not None:
+            c2.markdown(f"**Dias restantes:** {'**'+str(dias)+'**' if dias >= 0 else f'⚠️ {abs(dias)}d vencido'}")
+        c2.markdown(f"**Status:** {sr}")
+        c3.markdown(f"**Valor total:** {vt}")
+        if ct.get("valor_recorrente"):   c3.markdown(f"**Recorrente:** {brl(ct['valor_recorrente'])}/ano")
+        if ct.get("valor_por_amostra"):  c3.markdown(f"**Por amostra:** {brl(ct['valor_por_amostra'])}")
+        if ct.get("comissao_percentual"): c3.markdown(f"**Comissão:** {ct['comissao_percentual']}%")
+        if ct.get("forma_pagamento"):     c3.markdown(f"**Pagamento:** {ct['forma_pagamento']}")
+        c4.markdown(f"**País:** {ct.get('pais','Brasil')}")
+        if ct.get("responsavel_interno"):  c4.markdown(f"**Responsável:** {ct['responsavel_interno']}")
+        if ct.get("parceiro_relacionado"): c4.markdown(f"**Parceiro:** {ct['parceiro_relacionado']}")
+        if ct.get("plataforma_vinculada"):  c4.markdown(f"**Plataforma:** {ct['plataforma_vinculada']}")
+        comp_flags = []
+        if ct.get("lgpd"):                     comp_flags.append("LGPD")
+        if ct.get("confidencialidade"):         comp_flags.append("Confidencialidade")
+        if ct.get("nao_concorrencia"):          comp_flags.append("Não concorrência")
+        if ct.get("propriedade_intelectual"):   comp_flags.append("Prop. Intelectual")
+        if ct.get("compartilhamento_dados"):    comp_flags.append("Compartilhamento dados")
+        if ct.get("internacionalizacao_dados"): comp_flags.append("Internacionalização dados")
+        if comp_flags:
+            st.markdown(f"**Compliance:** {' · '.join(comp_flags)}")
+        if ct.get("amostras_contratadas"):
+            am_ut  = ct.get("amostras_utilizadas",0) or 0
+            am_ct  = ct["amostras_contratadas"]
+            am_sal = am_ct - am_ut + (ct.get("amostras_bonus",0) or 0)
+            ac1, ac2, ac3 = st.columns(3)
+            ac1.metric("Amostras contratadas", am_ct)
+            ac2.metric("Amostras utilizadas",  am_ut)
+            ac3.metric("Saldo amostras",       am_sal)
+        if ct.get("observacoes"):  st.caption(f"📝 {ct['observacoes']}")
+        if ct.get("obs_tecnicas"): st.caption(f"🔧 {ct['obs_tecnicas']}")
+        parcelas = _parcelas_by_ct.get(ct["id"], [])
+        if parcelas:
+            with st.expander(f"📊 {len(parcelas)} parcelas", expanded=False):
+                df_p = pd.DataFrame(parcelas)[["numero","data_emissao","valor","saldo_atual","situacao","numero_nf"]]
+                df_p.columns = ["#","Emissão","Valor","Saldo","Situação","NF"]
+                df_p["Valor"] = df_p["Valor"].apply(brl)
+                df_p["Saldo"] = df_p["Saldo"].apply(brl)
+                st.dataframe(df_p.fillna("—"), use_container_width=True, hide_index=True)
+        creditos_ct = _creditos_by_ct.get(ct["id"], [])
+        if creditos_ct:
+            with st.expander(f"💳 {len(creditos_ct)} crédito(s) vinculado(s)", expanded=False):
+                for cr in creditos_ct:
+                    saldo = (cr.get("valor_original") or 0) - (cr.get("valor_utilizado") or 0)
+                    st.markdown(
+                        f"**{cr.get('cliente_nome','—')}** &nbsp;·&nbsp; "
+                        f"NF {cr.get('numero_nf','—')} &nbsp;·&nbsp; "
+                        f"Original: {brl(cr.get('valor_original') or 0)} &nbsp;·&nbsp; "
+                        f"Saldo: **{brl(saldo)}** &nbsp;·&nbsp; "
+                        f"Status: {cr.get('status','—')} &nbsp;·&nbsp; "
+                        f"Venc.: {cr.get('data_vencimento','—') or '—'}"
+                    )
+        elif ct["status_real"] not in ("ENCERRADO","RESCINDIDO"):
+            st.caption("💳 Nenhum crédito vinculado — acesse Créditos para adicionar.")
+        a1, a2, a3, a4 = st.columns(4)
+        if ct["status_real"] not in ("ENCERRADO","RESCINDIDO"):
+            if a1.button("⏹️ Encerrar", key=f"enc_{tab_key}_{ct['id']}", use_container_width=True):
+                update_contrato(ct["id"], {"status":"ENCERRADO"})
+                st.rerun()
+            if a2.button("📝 Editar", key=f"edit_{tab_key}_{ct['id']}", use_container_width=True):
+                st.session_state["_editar_ct_id"] = ct["id"]
+                st.rerun()
+        else:
+            if a1.button("🔄 Reativar", key=f"reativ_{tab_key}_{ct['id']}", use_container_width=True):
+                update_contrato(ct["id"], {"status":"ATIVO"})
+                st.rerun()
+        if a4.button("🗑️ Excluir", key=f"del_{tab_key}_{ct['id']}", use_container_width=True):
+            delete_contrato(ct["id"])
+            st.rerun()
+
     def _render_lista(contratos, tab_key):
         if not contratos:
             st.info("Nenhum contrato nesta categoria.")
             return
         st.markdown(f"**{len(contratos)} contrato(s)**")
-        from collections import defaultdict
-        por_empresa = defaultdict(list)
+        from collections import defaultdict as _dd
+        por_empresa = _dd(list)
         for ct in contratos:
             por_empresa[ct.get("empresa_gg") or "—"].append(ct)
         for empresa, contratos_emp in sorted(por_empresa.items()):
@@ -242,93 +344,15 @@ with tab_lista:
             )
             for ct in contratos_emp:
                 sr   = ct["status_real"]
-                cor, bg = STATUS_COLORS.get(sr, ("#6B7280","#F3F4F6"))
-                dias = dias_ate(ct.get("data_termino"))
-                dt   = pd.to_datetime(ct["data_termino"]).strftime("%d/%m/%Y") if ct.get("data_termino") else "—"
-                vt   = brl(ct["valor_total"]) if ct.get("valor_total") else "—"
                 flags = flag_icons(ct)
-                with st.expander(
-                    f"**{ct['contratante']}**  ·  "
-                    f"{ct.get('tipo_contrato','—')}  ·  {sr}  {flags}"
-                ):
-                    c1, c2, c3, c4 = st.columns(4)
-                    c1.markdown(f"**Tipo:** {ct.get('tipo_contrato','—')}")
-                    c1.markdown(f"**Categoria:** {ct.get('categoria','—')}")
-                    c1.markdown(f"**Serviço:** {ct.get('servico_principal','—')}")
-                    c2.markdown(f"**Vencimento:** {dt}")
-                    c2.markdown(f"**Assinatura:** {ct.get('data_assinatura','—') or '—'}")
-                    if dias is not None:
-                        c2.markdown(f"**Dias restantes:** {'**'+str(dias)+'**' if dias >= 0 else f'⚠️ {abs(dias)}d vencido'}")
-                    c2.markdown(f"**Status:** {sr}")
-                    c3.markdown(f"**Valor total:** {vt}")
-                    if ct.get("valor_recorrente"):   c3.markdown(f"**Recorrente:** {brl(ct['valor_recorrente'])}/ano")
-                    if ct.get("valor_por_amostra"):  c3.markdown(f"**Por amostra:** {brl(ct['valor_por_amostra'])}")
-                    if ct.get("comissao_percentual"): c3.markdown(f"**Comissão:** {ct['comissao_percentual']}%")
-                    if ct.get("forma_pagamento"):     c3.markdown(f"**Pagamento:** {ct['forma_pagamento']}")
-                    c4.markdown(f"**País:** {ct.get('pais','Brasil')}")
-                    if ct.get("responsavel_interno"):  c4.markdown(f"**Responsável:** {ct['responsavel_interno']}")
-                    if ct.get("parceiro_relacionado"): c4.markdown(f"**Parceiro:** {ct['parceiro_relacionado']}")
-                    if ct.get("plataforma_vinculada"):  c4.markdown(f"**Plataforma:** {ct['plataforma_vinculada']}")
-                    comp_flags = []
-                    if ct.get("lgpd"):                     comp_flags.append("LGPD")
-                    if ct.get("confidencialidade"):         comp_flags.append("Confidencialidade")
-                    if ct.get("nao_concorrencia"):          comp_flags.append("Não concorrência")
-                    if ct.get("propriedade_intelectual"):   comp_flags.append("Prop. Intelectual")
-                    if ct.get("compartilhamento_dados"):    comp_flags.append("Compartilhamento dados")
-                    if ct.get("internacionalizacao_dados"): comp_flags.append("Internacionalização dados")
-                    if comp_flags:
-                        st.markdown(f"**Compliance:** {' · '.join(comp_flags)}")
-                    if ct.get("amostras_contratadas"):
-                        am_ut  = ct.get("amostras_utilizadas",0) or 0
-                        am_ct  = ct["amostras_contratadas"]
-                        am_sal = am_ct - am_ut + (ct.get("amostras_bonus",0) or 0)
-                        ac1, ac2, ac3 = st.columns(3)
-                        ac1.metric("Amostras contratadas", am_ct)
-                        ac2.metric("Amostras utilizadas",  am_ut)
-                        ac3.metric("Saldo amostras",       am_sal)
-                    if ct.get("observacoes"):  st.caption(f"📝 {ct['observacoes']}")
-                    if ct.get("obs_tecnicas"): st.caption(f"🔧 {ct['obs_tecnicas']}")
-                    parcelas = list_parcelas(ct["id"])
-                    if parcelas:
-                        with st.expander(f"📊 {len(parcelas)} parcelas", expanded=False):
-                            df_p = pd.DataFrame(parcelas)[["numero","data_emissao","valor","saldo_atual","situacao","numero_nf"]]
-                            df_p.columns = ["#","Emissão","Valor","Saldo","Situação","NF"]
-                            df_p["Valor"] = df_p["Valor"].apply(brl)
-                            df_p["Saldo"] = df_p["Saldo"].apply(brl)
-                            st.dataframe(df_p.fillna("—"), use_container_width=True, hide_index=True)
-                    try:
-                        creditos_ct = list_creditos(contrato_id=ct["id"])
-                        if creditos_ct:
-                            with st.expander(f"💳 {len(creditos_ct)} crédito(s) vinculado(s)", expanded=False):
-                                for cr in creditos_ct:
-                                    saldo = (cr.get("valor_original") or 0) - (cr.get("valor_utilizado") or 0)
-                                    st.markdown(
-                                        f"**{cr.get('cliente_nome','—')}** &nbsp;·&nbsp; "
-                                        f"NF {cr.get('numero_nf','—')} &nbsp;·&nbsp; "
-                                        f"Original: {brl(cr.get('valor_original') or 0)} &nbsp;·&nbsp; "
-                                        f"Saldo: **{brl(saldo)}** &nbsp;·&nbsp; "
-                                        f"Status: {cr.get('status','—')} &nbsp;·&nbsp; "
-                                        f"Venc.: {cr.get('data_vencimento','—') or '—'}"
-                                    )
-                        elif ct["status_real"] not in ("ENCERRADO","RESCINDIDO"):
-                            st.caption("💳 Nenhum crédito vinculado — acesse Créditos para adicionar.")
-                    except Exception:
-                        pass
-                    a1, a2, a3, a4 = st.columns(4)
-                    if ct["status_real"] not in ("ENCERRADO","RESCINDIDO"):
-                        if a1.button("⏹️ Encerrar", key=f"enc_{tab_key}_{ct['id']}"):
-                            update_contrato(ct["id"], {"status":"ENCERRADO"})
-                            st.rerun()
-                        if a2.button("📝 Editar", key=f"edit_{tab_key}_{ct['id']}"):
-                            st.session_state["_editar_ct_id"] = ct["id"]
-                            st.rerun()
-                    else:
-                        if a1.button("🔄 Reativar", key=f"reativ_{tab_key}_{ct['id']}"):
-                            update_contrato(ct["id"], {"status":"ATIVO"})
-                            st.rerun()
-                    if a4.button("🗑️ Excluir", key=f"del_{tab_key}_{ct['id']}"):
-                        delete_contrato(ct["id"])
-                        st.rerun()
+                lcol1, lcol2 = st.columns([6, 1])
+                with lcol1:
+                    st.markdown(
+                        f"**{ct['contratante']}**  ·  {ct.get('tipo_contrato','—')}  ·  {sr}  {flags}"
+                    )
+                if lcol2.button("Ver detalhes", key=f"ver_{tab_key}_{ct['id']}", use_container_width=True):
+                    _abrir_dialog_contrato(ct, tab_key)
+                st.markdown("<hr style='margin:4px 0;border-color:#EAE6F4'>", unsafe_allow_html=True)
 
     stab_at, stab_venc, stab_enc = st.tabs([
         f"✅ Ativos ({len(ct_ativos)})",

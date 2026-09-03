@@ -212,12 +212,20 @@ def delete_contrato(id):
         conn.execute("DELETE FROM contratos WHERE id=?", (id,))
 
 # ── Parcelas ──────────────────────────────────────────────────────────────────
-def list_parcelas(contrato_id):
+def list_parcelas(contrato_id=None):
+    """contrato_id=None carrega TODAS as parcelas de uma vez (usado pra montar
+    um indice em memoria na pagina de Contratos, em vez de 1 consulta por
+    contrato — ver pages/7_Contratos.py)."""
     with _conn() as conn:
-        rows = conn.execute(
-            "SELECT * FROM contrato_parcelas WHERE contrato_id=? ORDER BY numero",
-            (contrato_id,)
-        ).fetchall()
+        if contrato_id is not None:
+            rows = conn.execute(
+                "SELECT * FROM contrato_parcelas WHERE contrato_id=? ORDER BY numero",
+                (contrato_id,)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM contrato_parcelas ORDER BY contrato_id, numero"
+            ).fetchall()
     return [dict(r) for r in rows]
 
 def insert_parcela(data) -> int:
