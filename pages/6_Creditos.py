@@ -43,6 +43,32 @@ def _load_all():
     notas    = f_nota.result()
     movs     = f_movs.result()
 
+    # Saldo (valor_utilizado) é sempre CALCULADO a partir do histórico de
+    # movimentações, nunca editado direto — soma UTILIZAÇÃO/USO/AJUSTE como
+    # débito, ESTORNO como crédito de volta. "USO" é um tipo legado (import de
+    # Excel antigo, ~125 registros) que significa a mesma coisa que
+    # UTILIZAÇÃO — tem que entrar na soma senão o saldo calculado fica errado.
+    # AJUSTE já vem com o sinal certo aplicado no lançamento (positivo = usa
+    # mais saldo, negativo = devolve saldo).
+    _debito_por_cred = defaultdict(float)
+    _ultimo_uso_por_cred = {}
+    for m in movs:
+        cid = m.get("credito_id")
+        valor = m.get("valor") or 0
+        tipo = m.get("tipo")
+        if tipo == "ESTORNO":
+            _debito_por_cred[cid] -= valor
+        else:  # UTILIZAÇÃO, USO (legado), AJUSTE
+            _debito_por_cred[cid] += valor
+        data_mov = m.get("data") or m.get("created_at")
+        if data_mov and (cid not in _ultimo_uso_por_cred or data_mov > _ultimo_uso_por_cred[cid]):
+            _ultimo_uso_por_cred[cid] = data_mov
+
+    for c in creditos:
+        c["_valor_utilizado_raw"] = c.get("valor_utilizado")
+        c["valor_utilizado"]      = _debito_por_cred.get(c["id"], 0)
+        c["ultimo_uso"]           = _ultimo_uso_por_cred.get(c["id"])
+
     # Índices — construídos aqui, reutilizados em todos os reruns
     cred_by_cli = defaultdict(list)
     for c in creditos:
@@ -152,53 +178,86 @@ def _status_dot(status: str, dias: "int | None") -> str:
         return "⚪"
     return "⚫"  # CANCELADO ou outro
 
+@st.cache_data(ttl=300, show_spinner="🔎 Buscando pedidos no eGestor…")
+def _buscar_servicos_egestor(cliente_nome: str) -> list:
+    """Busca serviços/pedidos REAIS do cliente nas 3 empresas eGestor (mesmo
+    padrão de busca por substring de pages/7_Servicos.py — case-insensitive,
+    sem normalização de acento), últimos 24 meses. Cada item ganha '_empresa'
+    pra dar rastreabilidade (qual empresa eGestor o pedido pertence)."""
+    from utils import get_clients
+    termo = (cliente_nome or "").strip().lower()
+    if not termo:
+        return []
+    dt_ini = (date.today() - timedelta(days=730)).isoformat()
+    dt_fim = date.today().isoformat()
+    achados = []
+    for empresa, client in get_clients().items():
+        try:
+            servicos = client.get_servicos(dt_ini, dt_fim)
+        except Exception:
+            continue
+        for s in servicos:
+            nome_contato = (s.get("nomeContato") or "").lower()
+            if termo in nome_contato or (nome_contato and nome_contato in termo):
+                s = dict(s)
+                s["_empresa"] = empresa
+                achados.append(s)
+    achados.sort(key=lambda s: s.get("dtVenda") or "", reverse=True)
+    return achados
+
 def _render_form_consumo(cr, key_suffix=""):
     """Formulário de registrar consumo — usado tanto na aba 💳 Créditos
     (Lista/Registrar Consumo) quanto no perfil do cliente (🧑‍🤝‍🧑 Clientes),
-    pra não ter duas versões divergentes da mesma coisa."""
+    pra não ter duas versões divergentes da mesma coisa.
+
+    O serviço/pedido é sempre um registro REAL do eGestor (rastreabilidade
+    NF → Crédito → Consumo → Serviço) — nada de descrição digitada à mão."""
     saldo_d = (cr["valor_original"] or 0) - (cr["valor_utilizado"] or 0)
     st.markdown(f"**Saldo disponível: {brl(saldo_d)}**")
 
+    servicos_disp = _buscar_servicos_egestor(cr.get("cliente_nome"))
+    if not servicos_disp:
+        st.warning(
+            f"⚠️ Nenhum pedido/serviço encontrado no eGestor pra "
+            f"**{cr.get('cliente_nome','este cliente')}** nos últimos 24 meses. "
+            f"Cadastre o pedido no eGestor antes de registrar o consumo aqui."
+        )
+        return
+
+    serv_opts = {
+        f"#{s.get('codigo','?')} · {s.get('_empresa','')} · "
+        f"{s.get('dtVenda','—')} · {brl(s.get('valorTotal'))} · {s.get('situacaoOS') or s.get('situacao') or ''}": s
+        for s in servicos_disp
+    }
+    serv_label = st.selectbox(
+        "Serviço/Pedido * (real, do eGestor)", list(serv_opts.keys()),
+        key=f"serv_sel_{cr['id']}{key_suffix}",
+    )
+    serv_sel = serv_opts[serv_label]
+
     with st.form(f"form_consumo_dash_{cr['id']}{key_suffix}", clear_on_submit=True):
-        ca, cb = st.columns(2)
-        desc_serv = ca.text_input("Descrição do serviço *", placeholder="ex: Microbioma 1 alvo",
-                                   key=f"desc_serv_{cr['id']}{key_suffix}")
-        with cb:
-            v_uso, _ = _valor_input(
-                "Valor consumido (R$) *", key=f"v_uso_{cr['id']}{key_suffix}",
-                help=f"Saldo disponível: {brl(saldo_d)}. Pode passar — o excedente vira saldo "
-                     f"negativo, cobrado do cliente à parte.",
-            )
+        v_uso, _ = _valor_input(
+            "Valor consumido (R$) *", key=f"v_uso_{cr['id']}{key_suffix}",
+            valor_atual=float(serv_sel.get("valorTotal") or 0) or None,
+            help=f"Saldo disponível: {brl(saldo_d)}. Pode passar — o excedente vira saldo "
+                 f"negativo, cobrado do cliente à parte.",
+        )
 
         cc, cd = st.columns(2)
         data_serv = cc.date_input("Data do serviço", value=date.today(),
                                    key=f"data_serv_{cr['id']}{key_suffix}")
         resp      = cd.text_input("Responsável", key=f"resp_{cr['id']}{key_suffix}")
-        obs_u = st.text_area("Observação", height=60, key=f"obs_u_{cr['id']}{key_suffix}")
-
-        with st.expander("➕ Detalhes por amostra (opcional)"):
-            ce, cf, cg = st.columns(3)
-            cod_serv = ce.text_input("Código do serviço", placeholder="ex: S5990",
-                                      key=f"cod_serv_{cr['id']}{key_suffix}")
-            qtd_am   = cf.number_input("Qtd amostras", min_value=0, step=1, value=0,
-                                        key=f"qtd_am_{cr['id']}{key_suffix}")
-            with cg:
-                vl_am, _ = _valor_input("Valor / amostra (R$)", key=f"vl_am_{cr['id']}{key_suffix}")
-            if qtd_am > 0 and vl_am:
-                st.caption(f"💡 {qtd_am} amostras × {brl(vl_am)} = {brl(qtd_am * vl_am)}")
+        obs_u = st.text_area("Observação (opcional)", height=60, key=f"obs_u_{cr['id']}{key_suffix}")
 
         if st.form_submit_button("💸 Registrar Consumo", use_container_width=True):
-            if not desc_serv.strip():
-                st.error("Informe a descrição do serviço.")
-            elif not v_uso or v_uso <= 0:
+            if not v_uso or v_uso <= 0:
                 st.error("❌ Informe um valor válido de consumo.")
             else:
-                novo_ut = (cr["valor_utilizado"] or 0) + v_uso
-                # Pode passar do saldo de propósito — o excedente vira saldo
-                # negativo e é cobrado do cliente à parte, não é erro.
-                novo_saldo = cr["valor_original"] - novo_ut
-                novo_st = "UTILIZADO" if novo_saldo <= 0 else cr["status"]
-                update_credito(cr["id"], {"valor_utilizado": novo_ut, "status": novo_st})
+                # Saldo é sempre CALCULADO a partir das movimentações (ver
+                # _load_all) — aqui só grava o lançamento, nunca valor_utilizado.
+                novo_saldo = saldo_d - v_uso
+                if novo_saldo <= 0 and cr["status"] != "UTILIZADO":
+                    update_credito(cr["id"], {"status": "UTILIZADO"})
                 insert_movimentacao({
                     "credito_id":        cr["id"],
                     "tipo":              "UTILIZAÇÃO",
@@ -206,10 +265,9 @@ def _render_form_consumo(cr, key_suffix=""):
                     "data":              str(data_serv),
                     "responsavel":       resp or None,
                     "observacao":        obs_u or None,
-                    "descricao_servico": desc_serv.strip(),
-                    "codigo_servico":    cod_serv.strip() or None,
-                    "qtd_amostras":      int(qtd_am) if qtd_am > 0 else None,
-                    "valor_amostra":     float(vl_am) if vl_am and vl_am > 0 else None,
+                    "descricao_servico": f"Pedido #{serv_sel.get('codigo','?')} ({serv_sel.get('_empresa','')})",
+                    "codigo_servico":    str(serv_sel.get("codigo") or "") or None,
+                    "servico_empresa":   serv_sel.get("_empresa"),
                 })
                 if novo_saldo < 0:
                     st.session_state["_consumo_ok"] = (
@@ -317,9 +375,253 @@ def _resumo_mem(cli_id: int) -> dict:
         "qtd_notas":       len(notas_),
     }
 
+def _saldo_credito(cr) -> float:
+    return (cr.get("valor_original") or 0) - (cr.get("valor_utilizado") or 0)
+
+def _divergencia_credito(cr) -> float:
+    """Diferença entre o valor_utilizado gravado no banco (campo legado —
+    editado direto no passado, pode estar errado) e o calculado a partir das
+    movimentações reais de hoje (sempre correto — ver _load_all). != 0 quer
+    dizer que esse crédito precisa de um ⚖️ Ajuste documentando a correção."""
+    bruto = cr.get("_valor_utilizado_raw")
+    if bruto is None:
+        return 0.0
+    calc = cr.get("valor_utilizado") or 0
+    return round((bruto or 0) - calc, 2)
+
+def _creditos_ja_ajustados() -> set:
+    return {m.get("credito_id") for m in movs_all if m.get("tipo") == "AJUSTE"}
+
+def _credito_precisa_conciliar(cr, ja_ajustados: set = None) -> bool:
+    """True quando há divergência entre o campo legado e o extrato real E
+    ainda ninguém documentou isso com um Ajuste — depois que alguém registra
+    o Ajuste (mesmo de valor 0, só pra explicar), o crédito para de ser
+    sinalizado, mesmo que o campo legado nunca mude (ele não é mais lido pra
+    nada, só serve de rastro histórico)."""
+    if abs(_divergencia_credito(cr)) < 0.01:
+        return False
+    if ja_ajustados is None:
+        ja_ajustados = _creditos_ja_ajustados()
+    return cr["id"] not in ja_ajustados
+
+def _creditos_divergentes() -> list:
+    ja_ajustados = _creditos_ja_ajustados()
+    return [c for c in creditos_all if _credito_precisa_conciliar(c, ja_ajustados)]
+
+def _parse_valor_signed(texto: str):
+    """Como _parse_valor, mas aceita '-' na frente pra ajustes que devolvem
+    saldo (crédito de volta pro cliente)."""
+    if not texto:
+        return None
+    t = texto.strip()
+    neg = t.startswith("-")
+    if neg:
+        t = t[1:].strip()
+    val = _parse_valor(t)
+    if val is None:
+        return None
+    return -val if neg else val
+
+@st.dialog("⚖️ Ajuste de saldo")
+def _abrir_dialog_ajuste(cr):
+    """Único jeito de corrigir o saldo calculado sem editar valor_utilizado
+    direto (a causa da divergência original) — todo ajuste vira uma
+    movimentação tipo AJUSTE, com motivo OBRIGATÓRIO, sempre visível no
+    extrato. Valor positivo consome mais saldo (débito); negativo devolve
+    saldo (estorna um débito indevido)."""
+    st.caption(f"{cr.get('cliente_nome', '?')} — {_nf_label(cr.get('numero_nf'))} · "
+               f"saldo atual: {brl(_saldo_credito(cr))}")
+    div = _divergencia_credito(cr)
+    if abs(div) >= 0.01:
+        st.warning(
+            f"⚠️ O campo antigo do banco registra {brl(cr.get('_valor_utilizado_raw') or 0)} "
+            f"utilizados, mas a soma real das movimentações mostra {brl(cr.get('valor_utilizado') or 0)} "
+            f"— diferença de {brl(div)}. Confirme com o histórico do cliente se realmente houve "
+            f"esse consumo antes de decidir o valor do ajuste abaixo."
+        )
+    with st.form(f"form_ajuste_{cr['id']}"):
+        valor_txt = st.text_input(
+            "Valor do ajuste (R$) *", key=f"ajuste_valor_{cr['id']}",
+            placeholder="ex: 1500,00 ou -1500,00",
+            help="Positivo = usa mais saldo (débito). Negativo = devolve saldo (estorna um "
+                 "débito indevido). O saldo do extrato já é sempre recalculado — isso só "
+                 "registra o lançamento com o motivo.",
+        )
+        resp   = st.text_input("Responsável", key=f"ajuste_resp_{cr['id']}")
+        motivo = st.text_area(
+            "Motivo do ajuste * (obrigatório)", height=90, key=f"ajuste_motivo_{cr['id']}",
+            placeholder="Explique a divergência encontrada e a correção aplicada — fica "
+                        "visível no extrato pra sempre.",
+        )
+        if st.form_submit_button("⚖️ Registrar ajuste", use_container_width=True):
+            val = _parse_valor_signed(valor_txt)
+            if not valor_txt.strip() or val is None:
+                st.error("❌ Informe um valor de ajuste válido (pode ser negativo).")
+            elif not motivo.strip():
+                st.error("❌ O motivo é obrigatório — todo ajuste precisa de uma explicação registrada.")
+            else:
+                insert_movimentacao({
+                    "credito_id": cr["id"],
+                    "tipo":       "AJUSTE",
+                    "valor":      float(val),
+                    "data":       str(date.today()),
+                    "responsavel": resp or None,
+                    "observacao": motivo.strip(),
+                })
+                st.session_state["_ajuste_ok"] = f"⚖️ Ajuste registrado no extrato de {cr.get('cliente_nome', '?')}."
+                _clear_and_rerun()
+
+@st.dialog("➕ Adicionar crédito")
+def _abrir_dialog_add_credito(cli):
+    st.caption(f"Novo crédito para {cli['nome']}")
+    notas_cl = _nota_by_cli.get(cli["id"], [])
+    nf_opts = {"— Sem NF —": None}
+    nf_opts.update({f"NF {n['numero_nf']}": n["id"] for n in notas_cl})
+
+    with st.form(f"form_add_cred_{cli['id']}", clear_on_submit=True):
+        valor, _ = _valor_input("Valor (R$) *", key=f"add_cred_valor_{cli['id']}",
+                                 help="Valor real do crédito concedido — confira antes de cadastrar.")
+        venc = st.date_input("Vencimento *", value=date.today() + timedelta(days=30),
+                              key=f"add_cred_venc_{cli['id']}")
+        c1, c2 = st.columns(2)
+        nf_sel  = c1.selectbox("NF já cadastrada", list(nf_opts.keys()), key=f"add_cred_nfsel_{cli['id']}")
+        nf_nova = c2.text_input("Ou NF nova", placeholder="ex: 6640", key=f"add_cred_nfnova_{cli['id']}")
+
+        contratos_cl = [ct for ct in _get_cont_by_cli().get(cli["id"], [])
+                         if ct.get("status_real") not in ("ENCERRADO", "RESCINDIDO")]
+        ct_opts = {"— Sem contrato —": None}
+        ct_opts.update({
+            f"{ct.get('contratante', '?')} ({ct.get('empresa_gg', '—')}) · {ct.get('tipo_contrato', '—')}": ct.get("id")
+            for ct in contratos_cl
+        })
+        ct_sel = st.selectbox("Contrato vinculado (opcional)", list(ct_opts.keys()), key=f"add_cred_ct_{cli['id']}")
+        obs = st.text_area("Observações", height=60, key=f"add_cred_obs_{cli['id']}")
+
+        if st.form_submit_button("➕ Adicionar crédito", use_container_width=True):
+            if valor is None:
+                st.error("❌ Informe um valor válido.")
+            elif valor < 1:
+                st.error(f"❌ Valor muito baixo ({brl(valor)}). Confirme se digitou certo antes de cadastrar.")
+            elif nf_nova.strip() and nf_sel != "— Sem NF —":
+                st.error("❌ Escolha uma NF já cadastrada OU digite uma nova — não os dois.")
+            else:
+                nota_fiscal_id_sel = nf_opts[nf_sel]
+                if nf_nova.strip():
+                    nota_fiscal_id_sel = insert_nota({
+                        "numero_nf": nf_nova.strip(), "cliente_id": cli["id"],
+                        "data_emissao": str(date.today()), "valor_total": float(valor),
+                    })
+                payload = {
+                    "cliente_id": cli["id"], "nota_fiscal_id": nota_fiscal_id_sel,
+                    "valor_original": float(valor), "data_vencimento": str(venc),
+                    "observacoes": obs or None, "contrato_id": ct_opts[ct_sel],
+                }
+                sucesso = False
+                try:
+                    insert_credito(payload)
+                    sucesso = True
+                except Exception as e:
+                    if "contrato_id" in str(e):
+                        try:
+                            payload.pop("contrato_id")
+                            insert_credito(payload)
+                            sucesso = True
+                        except Exception as e2:
+                            st.error(f"❌ Não foi possível cadastrar o crédito: {e2}")
+                    else:
+                        st.error(f"❌ Não foi possível cadastrar o crédito: {e}")
+                if sucesso:
+                    st.session_state["_wallet_ok"] = f"✅ Crédito de {brl(valor)} adicionado para {cli['nome']}!"
+                    _clear_and_rerun()
+
+@st.dialog("💸 Usar crédito")
+def _abrir_dialog_usar(cli, creds_disponiveis):
+    if len(creds_disponiveis) == 1:
+        cr = creds_disponiveis[0]
+    else:
+        opts = {
+            f"{_nf_label(c.get('numero_nf'))} — saldo {brl(_saldo_credito(c))}"
+            f"{' ⚠️ EXPIRADO' if c['status'] == 'EXPIRADO' else ''} (#{c['id']})": c
+            for c in creds_disponiveis
+        }
+        label = st.selectbox("Qual crédito usar?", list(opts.keys()), key=f"usar_sel_{cli['id']}")
+        cr = opts[label]
+    alerta_exp = " ⚠️ EXPIRADO" if cr["status"] == "EXPIRADO" else ""
+    st.caption(f"{_nf_label(cr.get('numero_nf'))}{alerta_exp}")
+    _render_form_consumo(cr, key_suffix=f"_wallet_{cr['id']}")
+
+@st.dialog("✏️ Editar crédito")
+def _abrir_dialog_editar_credito(cr):
+    st.caption(f"{cr.get('cliente_nome', '?')} — {_nf_label(cr.get('numero_nf'))}")
+    notas_cl_edit = _nota_by_cli.get(cr.get("cliente_id"), [])
+    nf_opts_edit = {"— Sem NF —": None}
+    nf_opts_edit.update({f"NF {n['numero_nf']}": n["id"] for n in notas_cl_edit})
+    nf_labels_edit = list(nf_opts_edit.keys())
+    nf_atual_idx = next((i for i, v in enumerate(nf_opts_edit.values()) if v == cr.get("nota_fiscal_id")), 0)
+
+    contratos_cl_edit = _get_cont_by_cli().get(cr.get("cliente_id"), [])
+    ct_opts_edit = {"— Sem contrato —": None}
+    ct_opts_edit.update({
+        f"{ct.get('contratante', '?')} ({ct.get('empresa_gg', '—')}) · {ct.get('tipo_contrato', '—')}": ct.get("id")
+        for ct in contratos_cl_edit
+    })
+    ct_labels_edit = list(ct_opts_edit.keys())
+    ct_atual_idx = next((i for i, v in enumerate(ct_opts_edit.values()) if v == cr.get("contrato_id")), 0)
+
+    with st.form(f"form_edit_cred_wallet_{cr['id']}"):
+        novo_valor, _ = _valor_input("Valor original (R$)", key=f"edit_valor_w_{cr['id']}",
+                                      valor_atual=float(cr.get("valor_original") or 0))
+        venc_atual = pd.to_datetime(cr.get("data_vencimento"), errors="coerce")
+        novo_venc = st.date_input(
+            "Vencimento", key=f"edit_venc_w_{cr['id']}",
+            value=venc_atual.date() if pd.notna(venc_atual) else date.today() + timedelta(days=30),
+        )
+        status_opts = ["VÁLIDO", "EXPIRADO", "UTILIZADO", "CANCELADO"]
+        novo_status = st.selectbox(
+            "Status", status_opts, key=f"edit_status_w_{cr['id']}",
+            index=status_opts.index(cr.get("status")) if cr.get("status") in status_opts else 0,
+        )
+        novo_nf_label = st.selectbox("NF vinculada", nf_labels_edit, index=nf_atual_idx, key=f"edit_nf_w_{cr['id']}")
+        novo_ct_label = st.selectbox("Contrato vinculado", ct_labels_edit, index=ct_atual_idx, key=f"edit_ct_w_{cr['id']}")
+        nova_obs = st.text_area("Observações", key=f"edit_obs_w_{cr['id']}",
+                                 value=cr.get("observacoes") or "", height=80)
+        if st.form_submit_button("💾 Salvar alterações", use_container_width=True):
+            if novo_valor is None:
+                st.error("❌ Informe um valor válido antes de salvar.")
+            else:
+                update_credito(cr["id"], {
+                    "valor_original":  float(novo_valor),
+                    "data_vencimento": str(novo_venc),
+                    "status":          novo_status,
+                    "nota_fiscal_id":  nf_opts_edit[novo_nf_label],
+                    "contrato_id":     ct_opts_edit[novo_ct_label],
+                    "observacoes":     nova_obs or None,
+                })
+                st.session_state["_wallet_ok"] = f"✅ Crédito de {cr.get('cliente_nome', '?')} atualizado!"
+                _clear_and_rerun()
+
+@st.dialog("🗑️ Apagar movimentação")
+def _abrir_dialog_del_mov(m):
+    st.caption(f"{m.get('tipo')} — {brl(m.get('valor'))} — {m.get('data') or ''}")
+    if m.get("observacao"):
+        st.caption(f"Obs: {m['observacao']}")
+    st.warning("Isso também desfaz o efeito no saldo do crédito (o extrato é recalculado na hora).")
+    if st.button("🗑️ Confirmar exclusão", key=f"del_mov_confirm_{m['id']}", use_container_width=True):
+        # Saldo é calculado a partir das movimentações (_load_all) — apagar
+        # já corrige o saldo sozinho no próximo load. Só falta destravar o
+        # status se o crédito não estiver mais 100% usado.
+        cred = next((c for c in creditos_all if c["id"] == m.get("credito_id")), None)
+        if (cred and m.get("tipo") in ("UTILIZAÇÃO", "USO") and cred.get("status") == "UTILIZADO"):
+            novo_ut = max(0, (cred.get("valor_utilizado") or 0) - (m.get("valor") or 0))
+            if novo_ut < (cred.get("valor_original") or 0):
+                update_credito(cred["id"], {"status": "VÁLIDO"})
+        delete_movimentacao(m["id"])
+        st.session_state["_wallet_ok"] = "✅ Movimentação apagada e saldo recalculado."
+        _clear_and_rerun()
+
 # ── Tabs principais ───────────────────────────────────────────────────────────
 main_tab = _tabs_persist(
-    ["📊 Painel", "🧑‍🤝‍🧑 Clientes", "💳 Créditos", "📋 Movimentações", "📑 Relatório Mensal"],
+    ["📊 Painel", "👛 Carteiras", "📑 Relatório Mensal"],
     key="cred_main_tab",
 )
 
@@ -394,18 +696,33 @@ if main_tab == "📊 Painel":
             </div>""", unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# TAB 2 — CLIENTES
+# TAB 2 — CARTEIRAS
 # ══════════════════════════════════════════════════════════════════════════════
-if main_tab == "🧑‍🤝‍🧑 Clientes":
-    cli_opts = {c["nome"]: c["id"] for c in clientes_all}
+if main_tab == "👛 Carteiras":
+    for _flash_key in ("_wallet_ok", "_ajuste_ok", "_consumo_ok"):
+        if st.session_state.get(_flash_key):
+            st.success(st.session_state.pop(_flash_key))
+
+    divergentes = _creditos_divergentes()
+    if divergentes:
+        nomes_div = sorted({c.get("cliente_nome", "?") for c in divergentes})
+        st.markdown(f"""
+        <div style='background:#FCEFD9;border-left:4px solid #B4720A;border-radius:8px;
+                    padding:12px 16px;margin-bottom:18px;font-size:.86rem;color:#4B3B1E'>
+          <b>⚠️ {len(divergentes)} crédito(s) com saldo divergente</b> — o valor gravado
+          antigamente no banco não bate com a soma real das movimentações de hoje.
+          O saldo mostrado abaixo já está correto (sempre calculado do extrato) — falta
+          só registrar um ⚖️ Ajuste em cada um documentando a correção, pra fechar a
+          divergência de vez: {", ".join(nomes_div)}.
+        </div>""", unsafe_allow_html=True)
 
     col1, col2 = st.columns([3, 1])
-    busca = col1.text_input("🔎 Buscar cliente")
-    if col2.button("➕ Novo Cliente", use_container_width=True):
-        st.session_state["_cred_novo_cli"] = True
+    busca = col1.text_input("🔎 Buscar cliente ou NF")
+    if col2.button("➕ Novo cliente", use_container_width=True):
+        st.session_state["_wallet_novo_cli"] = True
 
-    if st.session_state.get("_cred_novo_cli"):
-        with st.form("form_novo_cli_dash", clear_on_submit=True):
+    if st.session_state.get("_wallet_novo_cli"):
+        with st.form("form_novo_cli_wallet", clear_on_submit=True):
             st.markdown("**Novo cliente**")
             c1, c2 = st.columns(2)
             nome  = c1.text_input("Nome *")
@@ -415,665 +732,244 @@ if main_tab == "🧑‍🤝‍🧑 Clientes":
             if s1.form_submit_button("✅ Salvar", use_container_width=True):
                 if nome.strip():
                     insert_cliente({"nome": nome.strip(), "email": email or None, "observacoes": obs or None})
-                    st.session_state["_cred_novo_cli"] = False
-                    st.success(f"✅ {nome} cadastrado!")
+                    st.session_state["_wallet_novo_cli"] = False
+                    st.session_state["wallet_cli_sel"] = nome.strip()
+                    st.session_state["_wallet_ok"] = f"✅ {nome} cadastrado!"
                     _clear_and_rerun()
                 else:
                     st.error("Nome é obrigatório.")
             if s2.form_submit_button("❌ Cancelar", use_container_width=True):
-                st.session_state["_cred_novo_cli"] = False
+                st.session_state["_wallet_novo_cli"] = False
                 st.rerun()
 
-    lista = [c for c in clientes_all if not busca or busca.lower() in c["nome"].lower()]
+    # Busca por nome de cliente OU por número de NF — pula direto pro dono da NF.
+    termo = (busca or "").strip().lower()
+    if termo:
+        clientes_match  = {c["id"] for c in clientes_all if termo in c["nome"].lower()}
+        nf_match_cli_ids = {c["cliente_id"] for c in creditos_all
+                             if termo in str(c.get("numero_nf") or "").lower()}
+        ids_match = clientes_match | nf_match_cli_ids
+        lista = [c for c in clientes_all if c["id"] in ids_match]
+    else:
+        lista = clientes_all
 
     if not lista:
         st.info("Nenhum cliente encontrado.")
     else:
-        hoje_ts = pd.Timestamp.today().normalize()
-
-        # ── Tabela resumo (leve — sem expanders por cliente) ──────────────────
+        # ── Tabela resumo — mesma leveza de antes, ordenada por saldo válido ──
         rows_tab = []
-        for cli in lista:
-            res = _resumo_mem(cli["id"])
+        for cli_r in lista:
+            res_r = _resumo_mem(cli_r["id"])
             rows_tab.append({
-                "Cliente":      cli["nome"],
-                "Saldo Válido": res.get("saldo_valido", 0),
-                "Créditos ✅":  res.get("qtd_validos", 0),
-                "Créditos ❌":  res.get("qtd_expirados", 0),
-                "Utilizado":    res.get("total_utilizado", 0),
-                "_id":          cli["id"],
+                "Cliente":      cli_r["nome"],
+                "Saldo Válido": res_r.get("saldo_valido", 0),
+                "Créditos ✅":  res_r.get("qtd_validos", 0),
+                "Créditos ❌":  res_r.get("qtd_expirados", 0),
+                "Utilizado":    res_r.get("total_utilizado", 0),
             })
-        df_clientes = pd.DataFrame(rows_tab)
-        df_show_cli = df_clientes.drop(columns=["_id"]).copy()
+        df_clientes = pd.DataFrame(rows_tab).sort_values("Saldo Válido", ascending=False)
+        df_show_cli = df_clientes.copy()
         df_show_cli["Saldo Válido"] = df_show_cli["Saldo Válido"].apply(brl)
         df_show_cli["Utilizado"]    = df_show_cli["Utilizado"].apply(brl)
         st.dataframe(df_show_cli, use_container_width=True, hide_index=True)
 
         st.markdown("---")
 
-        # ── Detalhe de UM cliente (seleção) ───────────────────────────────────
         nomes_lista = [c["nome"] for c in lista]
-        cli_sel_nome = st.selectbox("👤 Ver detalhe do cliente:", nomes_lista, key="cli_det_sel")
+        if st.session_state.get("wallet_cli_sel") not in nomes_lista:
+            st.session_state["wallet_cli_sel"] = nomes_lista[0]
+        cli_sel_nome = st.selectbox("👛 Ver carteira de:", nomes_lista, key="wallet_cli_sel")
         cli = next(c for c in lista if c["nome"] == cli_sel_nome)
-        res = _resumo_mem(cli["id"])
 
-        k1c, k2c, k3c, k4c = st.columns(4)
-        k1c.metric("Créditos válidos",   res.get("qtd_validos", 0))
-        k2c.metric("Créditos expirados", res.get("qtd_expirados", 0))
-        k3c.metric("Saldo válido",        brl(res.get("saldo_valido", 0)))
-        k4c.metric("Total utilizado",     brl(res.get("total_utilizado", 0)))
+        creds_cli = _cred_by_cli.get(cli["id"], [])
+        movs_cli  = _mov_by_cli.get(cli["id"], [])
+        res       = _resumo_mem(cli["id"])
+        creds_com_saldo = [c for c in creds_cli if c["status"] != "CANCELADO" and _saldo_credito(c) > 0]
 
-        cli_sub_tab = _tabs_persist(
-            ["💳 Créditos", "📄 Notas Fiscais", "📋 Movimentações", "📑 Contratos"],
-            key="cred_cli_subtab",
-        )
+        # ── Cabeçalho da carteira ────────────────────────────────────────────
+        hcol1, hcol2 = st.columns([2.2, 1])
+        with hcol1:
+            st.markdown(f"### {cli['nome']}")
+            sub_bits = [f"{res.get('qtd_validos', 0)} crédito(s) válido(s)"]
+            if res.get("qtd_expirados", 0):
+                sub_bits.append(f"{res['qtd_expirados']} expirado(s)")
+            st.caption(" · ".join(sub_bits))
+        with hcol2:
+            extra_exp = ""
+            if res.get("saldo_expirado", 0) > 0.009:
+                extra_exp = (f"<div style='font-size:.78rem;color:#B4720A'>"
+                             f"+ {brl(res.get('saldo_expirado', 0))} em créditos expirados</div>")
+            st.markdown(f"""
+            <div style='text-align:right'>
+              <div style='font-size:.7rem;text-transform:uppercase;letter-spacing:1px;color:#8B6BAE'>
+                Saldo disponível</div>
+              <div style='font-size:1.6rem;font-weight:800;color:#159A73'>{brl(res.get('saldo_valido', 0))}</div>
+              {extra_exp}
+            </div>""", unsafe_allow_html=True)
 
-        creds_cli     = _cred_by_cli.get(cli["id"], [])
-        notas_cli     = _nota_by_cli.get(cli["id"], [])
-        movs_cli      = _mov_by_cli.get(cli["id"], [])
-
-        if cli_sub_tab == "💳 Créditos":
-            if st.session_state.get("_consumo_cli_ok"):
-                st.success(st.session_state.pop("_consumo_cli_ok"))
-            if st.session_state.get("_edit_cred_ok"):
-                st.success(st.session_state.pop("_edit_cred_ok"))
-            if not creds_cli:
-                st.info("Sem créditos.")
+        bcol1, bcol2, bcol3, bcol4 = st.columns(4)
+        if bcol1.button("➕ Adicionar crédito", use_container_width=True, key=f"btn_add_{cli['id']}"):
+            _abrir_dialog_add_credito(cli)
+        if bcol2.button("💸 Usar crédito", use_container_width=True,
+                         disabled=not creds_com_saldo, key=f"btn_use_{cli['id']}"):
+            _abrir_dialog_usar(cli, creds_com_saldo)
+        if bcol3.button("⚖️ Ajuste", use_container_width=True,
+                         disabled=not creds_cli, key=f"btn_adj_{cli['id']}"):
+            if len(creds_cli) == 1:
+                _abrir_dialog_ajuste(creds_cli[0])
             else:
-                for cr in creds_cli:
-                    saldo_cr = (cr["valor_original"] or 0) - (cr["valor_utilizado"] or 0)
-                    venc = pd.to_datetime(cr["data_vencimento"], errors="coerce")
-                    dias = int((venc - hoje_ts).days) if pd.notna(venc) else None
-                    alerta = _status_dot(cr["status"], dias) + " "
-                    nf_label = _nf_label(cr.get('numero_nf'))
-                    with st.expander(f"{alerta}{nf_label}  ·  {brl(saldo_cr)}  ·  {cr['status']}"):
-                        ca, cb, cc = st.columns(3)
-                        ca.metric("Original",  brl(cr["valor_original"]))
-                        cb.metric("Utilizado", brl(cr["valor_utilizado"]))
-                        cc.metric("Saldo",     brl(saldo_cr))
-                        if dias is not None:
-                            st.caption(f"Vencimento: {venc.strftime('%d/%m/%Y')} · {dias} dias")
+                st.session_state["_wallet_escolher_ajuste"] = cli["id"]
+        if bcol4.button("📄 Nova NF", use_container_width=True, key=f"btn_nf_{cli['id']}"):
+            st.session_state[f"_wallet_nova_nf_{cli['id']}"] = True
 
-                        st.markdown("**Número da NF**")
-                        _attach_nf_control(cr, key_suffix="_cli")
+        if st.session_state.get("_wallet_escolher_ajuste") == cli["id"]:
+            opts_adj = {f"{_nf_label(c.get('numero_nf'))} — saldo {brl(_saldo_credito(c))} (#{c['id']})": c
+                        for c in creds_cli}
+            sel_adj = st.selectbox("Ajuste em qual crédito?", list(opts_adj.keys()), key=f"adj_pick_{cli['id']}")
+            if st.button("Continuar", key=f"adj_pick_go_{cli['id']}"):
+                st.session_state.pop("_wallet_escolher_ajuste")
+                _abrir_dialog_ajuste(opts_adj[sel_adj])
 
-                        if cr["status"] != "CANCELADO" and saldo_cr > 0:
-                            st.markdown("**Registrar consumo**")
-                            _render_form_consumo(cr, key_suffix="_cli")
-
-                        st.markdown("---")
-                        movs_do_credito = [m for m in movs_all if m.get("credito_id") == cr["id"]]
-                        if movs_do_credito:
-                            st.caption(f"⚠️ Tem {len(movs_do_credito)} movimentação(ões) — excluir apaga junto.")
-                        confirma_del_cli = st.checkbox("Confirmo a exclusão", key=f"del_confirm_cli_{cr['id']}")
-                        if st.button("🗑️ Excluir crédito", key=f"del_btn_cli_{cr['id']}",
-                                     disabled=not confirma_del_cli):
-                            delete_credito(cr["id"])
-                            st.session_state["_edit_cred_ok"] = f"🗑️ Crédito excluído."
-                            _clear_and_rerun()
-
-        if cli_sub_tab == "📄 Notas Fiscais":
-            if notas_cli:
-                for nf in notas_cli:
-                    cols = st.columns([3, 2, 2, 1])
-                    cols[0].markdown(f"**NF {nf['numero_nf']}**")
-                    cols[1].markdown(nf.get("data_emissao") or "—")
-                    cols[2].markdown(brl(nf["valor_total"]))
-                    if cols[3].button("🗑️", key=f"del_nf_dash_{nf['id']}"):
-                        delete_nota(nf["id"])
-                        _clear_and_rerun()
-            with st.form(f"nova_nf_dash_{cli['id']}", clear_on_submit=True):
-                st.caption("Nova NF")
+        if st.session_state.get(f"_wallet_nova_nf_{cli['id']}"):
+            with st.form(f"nova_nf_wallet_{cli['id']}", clear_on_submit=True):
+                st.caption("Nova NF (sem crédito automático — use ➕ Adicionar crédito pra isso)")
                 n1, n2 = st.columns(2)
-                num_nf   = n1.text_input("Número NF")
+                num_nf = n1.text_input("Número NF")
                 with n2:
-                    valor_nf, _ = _valor_input("Valor (R$)", key=f"valor_nf_{cli['id']}")
-                data_em  = n1.date_input("Data emissão")
-                auto_cred = n2.checkbox("Criar crédito automaticamente", value=True)
-                venc_nf = None
-                if auto_cred:
-                    venc_nf = st.date_input("Vencimento do crédito",
-                                             value=date.today() + timedelta(days=30))
-                if st.form_submit_button("➕ Cadastrar NF", use_container_width=True):
+                    valor_nf, _ = _valor_input("Valor (R$)", key=f"valor_nf_w_{cli['id']}")
+                data_em = st.date_input("Data emissão")
+                sb1, sb2 = st.columns(2)
+                if sb1.form_submit_button("➕ Cadastrar NF", use_container_width=True):
                     if not num_nf.strip():
                         st.error("❌ Informe o número da NF.")
-                    elif valor_nf is None:
-                        st.error("❌ Informe um valor válido para a NF.")
                     else:
-                        nf_id = insert_nota({"numero_nf": num_nf.strip(), "cliente_id": cli["id"],
-                                              "data_emissao": str(data_em), "valor_total": float(valor_nf)})
-                        if auto_cred and valor_nf > 0:
-                            insert_credito({"cliente_id": cli["id"], "nota_fiscal_id": nf_id,
-                                            "valor_original": float(valor_nf),
-                                            "data_vencimento": str(venc_nf) if venc_nf else None})
-                        st.success(f"✅ NF {num_nf} cadastrada!")
+                        insert_nota({"numero_nf": num_nf.strip(), "cliente_id": cli["id"],
+                                     "data_emissao": str(data_em), "valor_total": float(valor_nf or 0)})
+                        st.session_state[f"_wallet_nova_nf_{cli['id']}"] = False
+                        st.session_state["_wallet_ok"] = f"✅ NF {num_nf} cadastrada!"
                         _clear_and_rerun()
+                if sb2.form_submit_button("❌ Cancelar", use_container_width=True):
+                    st.session_state[f"_wallet_nova_nf_{cli['id']}"] = False
+                    st.rerun()
 
-        if cli_sub_tab == "📋 Movimentações":
-            if not movs_cli:
-                st.info("Sem movimentações.")
-            else:
-                df_m = pd.DataFrame(movs_cli)
-                for col_opt in ["descricao_servico","codigo_servico","qtd_amostras","valor_amostra"]:
-                    if col_opt not in df_m.columns:
-                        df_m[col_opt] = None
-                cols_show = ["data","tipo","descricao_servico","codigo_servico",
-                             "qtd_amostras","valor_amostra","valor","responsavel","observacao"]
-                df_show = df_m[[c for c in cols_show if c in df_m.columns]].copy()
-                df_show["valor"] = pd.to_numeric(df_show["valor"], errors="coerce").fillna(0).apply(brl)
-                if "valor_amostra" in df_show.columns:
-                    df_show["valor_amostra"] = df_show["valor_amostra"].apply(
-                        lambda v: brl(v) if pd.notna(v) and v else "—")
-                if "qtd_amostras" in df_show.columns:
-                    df_show["qtd_amostras"] = df_show["qtd_amostras"].apply(
-                        lambda v: str(int(v)) if pd.notna(v) and v else "—")
-                rename = {"data":"Data","tipo":"Tipo","descricao_servico":"Serviço",
-                          "codigo_servico":"Cód.","qtd_amostras":"Amostras",
-                          "valor_amostra":"Vl/Amostra","valor":"Total",
-                          "responsavel":"Responsável","observacao":"Obs."}
-                df_show.rename(columns=rename, inplace=True)
-                st.dataframe(df_show.fillna("—"), use_container_width=True, hide_index=True)
+        # ── Créditos (envelopes) abertos ─────────────────────────────────────
+        if creds_cli:
+            st.markdown("<br>", unsafe_allow_html=True)
+            hoje_ts = pd.Timestamp.today().normalize()
+            creds_sorted = sorted(creds_cli, key=lambda c: c.get("data_vencimento") or "")
+            for start in range(0, len(creds_sorted), 4):
+                row_cols = st.columns(4)
+                for j, cr in enumerate(creds_sorted[start:start + 4]):
+                    saldo_cr = _saldo_credito(cr)
+                    venc = pd.to_datetime(cr.get("data_vencimento"), errors="coerce")
+                    dias = int((venc - hoje_ts).days) if pd.notna(venc) else None
+                    dot  = _status_dot(cr["status"], dias)
+                    tag_div = (" <span style='color:#B4720A;font-size:.66rem;font-weight:700'>"
+                               "⚠️ divergente</span>") if _credito_precisa_conciliar(cr) else ""
+                    with row_cols[j]:
+                        st.markdown(f"""
+                        <div style='background:#fff;border:1px solid #EAE6F4;border-radius:12px;
+                                    padding:12px 14px;margin-bottom:8px'>
+                          <div style='font-size:.82rem;font-weight:600'>{dot} {_nf_label(cr.get('numero_nf'))}{tag_div}</div>
+                          <div style='font-family:monospace;font-size:1.05rem;font-weight:700;margin-top:3px'>
+                            {brl(saldo_cr)}</div>
+                          <div style='font-size:.72rem;color:#8B6BAE'>{cr['status']} · de {brl(cr.get('valor_original'))}
+                            {f" · vence {venc.strftime('%d/%m/%Y')}" if pd.notna(venc) else ""}</div>
+                        </div>""", unsafe_allow_html=True)
+                        ec1, ec2 = st.columns(2)
+                        if ec1.button("✏️ Editar", key=f"btn_edit_{cr['id']}", use_container_width=True):
+                            _abrir_dialog_editar_credito(cr)
+                        if ec2.button("🗑️ Excluir", key=f"btn_delc_{cr['id']}", use_container_width=True):
+                            _abrir_dialog_excluir(cr)
 
-        if cli_sub_tab == "📑 Contratos":
-            contratos_cli = _get_cont_by_cli().get(cli["id"], [])
-            if not contratos_cli:
-                st.info("Nenhum contrato vinculado a este cliente.")
-                st.caption("Para vincular, edite um contrato na página 📑 Contratos.")
-            else:
-                for ct in contratos_cli:
-                    venc_c = pd.to_datetime(ct.get("data_termino"), errors="coerce")
-                    dias_c = int((venc_c - hoje_ts).days) if pd.notna(venc_c) else None
-                    cor_c  = "#EF4444" if (dias_c is not None and dias_c < 0) else \
-                             "#F59E0B" if (dias_c is not None and dias_c <= 30) else "#10B981"
-                    venc_s = venc_c.strftime("%d/%m/%Y") if pd.notna(venc_c) else "—"
-                    st.markdown(f"""
-                    <div style='background:#fff;border-radius:8px;padding:12px 16px;
-                                margin-bottom:8px;border-left:4px solid {cor_c};
-                                box-shadow:0 1px 4px rgba(0,0,0,0.06)'>
-                      <div style='font-weight:700'>{ct.get('contratante','—')}
-                        <span style='font-size:.8rem;color:#8B6BAE;margin-left:8px'>{ct.get('empresa_gg','')}</span>
-                      </div>
-                      <div style='font-size:.85rem;color:#4B5563;margin-top:4px'>
-                        Valor: <b>{brl(ct.get('valor_total'))}</b> &nbsp;·&nbsp;
-                        Vencimento: <b>{venc_s}</b>
-                        {f" · <b style='color:{cor_c}'>{dias_c}d</b>" if dias_c is not None else ""}
-                      </div>
-                    </div>""", unsafe_allow_html=True)
+        # ── Extrato ───────────────────────────────────────────────────────────
+        st.markdown("#### 📜 Extrato")
 
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 3 — CRÉDITOS
-# ══════════════════════════════════════════════════════════════════════════════
-if main_tab == "💳 Créditos":
-    cli_opts = {c["nome"]: c["id"] for c in clientes_all}
+        cred_id_to_nf = {cr["id"]: _nf_label(cr.get("numero_nf")) for cr in creds_cli}
+        linhas = []
+        for cr in creds_cli:
+            linhas.append({
+                "_ord": cr.get("created_at") or cr.get("data_vencimento") or "",
+                "data": cr.get("created_at", ""),
+                "tipo": "ENTRADA",
+                "desc": f"Crédito concedido — {_nf_label(cr.get('numero_nf'))}",
+                "sub":  cr.get("observacoes") or "",
+                "valor": cr.get("valor_original") or 0,
+                "mov":  None,
+            })
+        for m in movs_cli:
+            tipo  = m.get("tipo")
+            raw   = m.get("valor") or 0
+            # Mesma lógica de sinal do cálculo de saldo em _load_all, invertida:
+            # o que lá é débito (reduz saldo) aqui aparece negativo no extrato;
+            # o que lá é crédito de volta aparece positivo.
+            valor_disp = raw if tipo == "ESTORNO" else -raw
+            desc_tipo = {"AJUSTE": "Ajuste de saldo", "ESTORNO": "Estorno"}.get(tipo)
+            desc = m.get("descricao_servico") or desc_tipo or tipo
+            nf_tag = cred_id_to_nf.get(m.get("credito_id"), "")
+            linhas.append({
+                "_ord": m.get("data") or m.get("created_at") or "",
+                "data": m.get("data") or "",
+                "tipo": tipo,
+                "desc": f"{desc} — {nf_tag}" if nf_tag else desc,
+                "sub":  m.get("observacao") or "",
+                "valor": valor_disp,
+                "mov":  m,
+            })
+        linhas.sort(key=lambda l: l["_ord"], reverse=True)
 
-    col1, col2, col3 = st.columns([2, 2, 2])
-    status_sel = col1.multiselect("Status", ["VÁLIDO","EXPIRADO","UTILIZADO","CANCELADO"],
-                                   default=["VÁLIDO"])
-    cli_f    = col2.selectbox("Cliente", ["Todos"] + list(cli_opts.keys()), key="cli_f_cred")
-    cli_id_f = cli_opts.get(cli_f) if cli_f != "Todos" else None
-    busca_nf = col3.text_input("🔎 Buscar por NF ou cliente", key="busca_nf_cred",
-                                placeholder="ex: 1234 ou nome do cliente")
-
-    cred_action = _tabs_persist(
-        ["📋 Lista", "➕ Novo Crédito", "💸 Registrar Consumo"],
-        key="cred_creditos_subtab",
-    )
-
-    if cred_action == "📋 Lista":
-        if st.session_state.get("_edit_cred_ok"):
-            st.success(st.session_state.pop("_edit_cred_ok"))
-
-        # Filter in memory. Busca por NF/cliente tem prioridade sobre o filtro
-        # de Status — já aconteceu 2x de um crédito EXPIRADO/UTILIZADO existir
-        # mas não aparecer porque o filtro de Status tinha ficado em "VÁLIDO",
-        # dando a impressão de que a busca "não achou" quando na real achava,
-        # só estava escondido pelo outro filtro.
-        creds_tab = creditos_all
-        if busca_nf:
-            termo = busca_nf.strip().lower()
-            creds_tab = [c for c in creds_tab
-                         if termo in str(c.get("numero_nf") or "").lower()
-                         or termo in str(c.get("cliente_nome") or "").lower()]
-        elif status_sel:
-            creds_tab = [c for c in creds_tab if c["status"] in status_sel]
-        if cli_id_f:
-            creds_tab = [c for c in creds_tab if c["cliente_id"] == cli_id_f]
-        if busca_nf and status_sel and len(status_sel) < 4:
-            st.caption("🔎 Busca ativa — mostrando qualquer status (ignorando o filtro de Status acima).")
-
-        if not creds_tab:
-            st.info("Nenhum crédito encontrado.")
+        if not linhas:
+            st.info("Sem movimentações ainda.")
         else:
-            hoje3 = pd.Timestamp.today().normalize()
-            total_saldo = sum((c.get("valor_original") or 0) - (c.get("valor_utilizado") or 0) for c in creds_tab)
-            st.markdown(f"**{len(creds_tab)} crédito(s) — Saldo total: {brl(total_saldo)}**")
-
-            # Tabela leve — sem expanders por linha
-            rows_cr = []
-            for cr in creds_tab:
-                saldo = (cr.get("valor_original") or 0) - (cr.get("valor_utilizado") or 0)
-                venc  = pd.to_datetime(cr.get("data_vencimento"), errors="coerce")
-                dias  = int((venc - hoje3).days) if pd.notna(venc) else None
-                alerta = _status_dot(cr["status"], dias)
-                rows_cr.append({
-                    "":          alerta,
-                    "Cliente":   cr.get("cliente_nome","—"),
-                    "NF":        cr.get("numero_nf") or "—",
-                    "Original":  cr.get("valor_original", 0),
-                    "Utilizado": cr.get("valor_utilizado", 0),
-                    "Saldo":     saldo,
-                    "Vencimento": venc.strftime("%d/%m/%Y") if pd.notna(venc) else "—",
-                    "Status":    cr["status"],
-                    "_id":       cr["id"],
-                })
-            df_creds_tab = pd.DataFrame(rows_cr)
-            df_creds_show = df_creds_tab.drop(columns=["_id"]).copy()
-            for col_brl in ["Original","Utilizado","Saldo"]:
-                df_creds_show[col_brl] = df_creds_show[col_brl].apply(brl)
-
-            import io as _io
-            buf_lista = _io.BytesIO()
-            with pd.ExcelWriter(buf_lista, engine="openpyxl") as writer:
-                df_creds_show.drop(columns=[""]).to_excel(writer, index=False, sheet_name="Creditos")
-            status_lbl = "+".join(status_sel) if status_sel else "Todos"
+            buf_extrato = io.BytesIO()
+            df_extrato = pd.DataFrame([{
+                "Data": l["data"], "Tipo": l["tipo"], "Descrição": l["desc"],
+                "Observação": l["sub"], "Valor": l["valor"],
+            } for l in linhas])
+            with pd.ExcelWriter(buf_extrato, engine="openpyxl") as writer:
+                df_extrato.to_excel(writer, index=False, sheet_name="Extrato")
             st.download_button(
-                f"📥 Exportar Excel ({len(creds_tab)} crédito{'s' if len(creds_tab) != 1 else ''} — {status_lbl})",
-                data=buf_lista.getvalue(),
-                file_name=f"creditos_{status_lbl.lower()}_{date.today().strftime('%Y%m%d')}.xlsx",
+                f"📥 Exportar extrato de {cli['nome']} (Excel)", data=buf_extrato.getvalue(),
+                file_name=f"extrato_{cli['nome'].lower().replace(' ', '_')}_{date.today().strftime('%Y%m%d')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key="dl_lista_creditos",
-            )
-            st.markdown("---")
-
-            # Uma linha por crédito, com 💸 (baixar/registrar consumo) e 🗑️
-            # (excluir) direto ali — sem precisar abrir outra aba e escolher de
-            # novo o mesmo crédito num dropdown.
-            _col_w = [0.3, 2.2, 0.9, 1.1, 1.1, 1.1, 1.0, 1.0, 0.55, 0.55]
-            hcols = st.columns(_col_w)
-            for h, label in zip(hcols, ["", "Cliente", "NF", "Original", "Utilizado",
-                                         "Saldo", "Vencimento", "Status", "", ""]):
-                if label:
-                    h.markdown(f"**{label}**")
-
-            for cr in creds_tab:
-                saldo = (cr.get("valor_original") or 0) - (cr.get("valor_utilizado") or 0)
-                venc  = pd.to_datetime(cr.get("data_vencimento"), errors="coerce")
-                dias  = int((venc - hoje3).days) if pd.notna(venc) else None
-                alerta = _status_dot(cr["status"], dias)
-                venc_str = venc.strftime("%d/%m/%Y") if pd.notna(venc) else "—"
-
-                rc = st.columns(_col_w)
-                rc[0].markdown(alerta)
-                rc[1].markdown(cr.get("cliente_nome", "—"))
-                rc[2].markdown(_nf_label(cr.get("numero_nf")))
-                rc[3].markdown(brl(cr.get("valor_original")))
-                rc[4].markdown(brl(cr.get("valor_utilizado")))
-                rc[5].markdown(brl(saldo))
-                rc[6].markdown(venc_str)
-                rc[7].markdown(cr["status"])
-
-                pode_consumir = cr["status"] != "CANCELADO" and saldo > 0
-                with rc[8]:
-                    if pode_consumir:
-                        if st.button("💸", key=f"btn_consumo_{cr['id']}", help="Registrar consumo"):
-                            _abrir_dialog_consumo(cr)
-
-                with rc[9]:
-                    if st.button("🗑️", key=f"btn_del_{cr['id']}", help="Excluir crédito"):
-                        _abrir_dialog_excluir(cr)
-
-            st.markdown("---")
-
-            # Editar detalhes de um crédito (valor, vencimento, status, NF, contrato, obs)
-            # — excluir agora é direto na linha da tabela (🗑️ acima).
-            with st.expander("✏️ Editar detalhes de um crédito"):
-                opts_edit = {
-                    f"{cr.get('cliente_nome','?')} — {_nf_label(cr.get('numero_nf'))} — "
-                    f"{brl(cr.get('valor_original'))} (#{cr['id']})": cr
-                    for cr in creds_tab
-                }
-                sel_edit_label = st.selectbox("Crédito:", list(opts_edit.keys()), key="sel_edit_cred")
-                cr_edit = opts_edit[sel_edit_label]
-
-                # Mesmas opções de NF/contrato do cadastro (➕ Novo Crédito), só que
-                # já pré-selecionadas com o que o crédito tem hoje.
-                notas_cl_edit = _nota_by_cli.get(cr_edit.get("cliente_id"), [])
-                nf_opts_edit  = {"— Sem NF —": None}
-                nf_opts_edit.update({f"NF {n['numero_nf']}": n["id"] for n in notas_cl_edit})
-                nf_labels_edit = list(nf_opts_edit.keys())
-                nf_atual_idx = next(
-                    (i for i, v in enumerate(nf_opts_edit.values()) if v == cr_edit.get("nota_fiscal_id")), 0
-                )
-
-                contratos_cl_edit = _get_cont_by_cli().get(cr_edit.get("cliente_id"), [])
-                ct_opts_edit = {"— Sem contrato —": None}
-                ct_opts_edit.update({
-                    f"{ct.get('contratante','?')} ({ct.get('empresa_gg','—')}) · {ct.get('tipo_contrato','—')}": ct.get("id")
-                    for ct in contratos_cl_edit
-                })
-                ct_labels_edit = list(ct_opts_edit.keys())
-                ct_atual_idx = next(
-                    (i for i, v in enumerate(ct_opts_edit.values()) if v == cr_edit.get("contrato_id")), 0
-                )
-
-                with st.form(f"form_edit_cred_{cr_edit['id']}"):
-                    ce1, ce2 = st.columns(2)
-                    with ce1:
-                        novo_valor, _ = _valor_input(
-                            "Valor original (R$)", key=f"edit_valor_{cr_edit['id']}",
-                            valor_atual=float(cr_edit.get("valor_original") or 0),
-                        )
-                    venc_atual = pd.to_datetime(cr_edit.get("data_vencimento"), errors="coerce")
-                    novo_venc = ce2.date_input(
-                        "Vencimento", key=f"edit_venc_{cr_edit['id']}",
-                        value=venc_atual.date() if pd.notna(venc_atual) else date.today() + timedelta(days=30),
-                    )
-                    status_opts = ["VÁLIDO", "EXPIRADO", "UTILIZADO", "CANCELADO"]
-                    novo_status = st.selectbox(
-                        "Status", status_opts, key=f"edit_status_{cr_edit['id']}",
-                        index=status_opts.index(cr_edit.get("status")) if cr_edit.get("status") in status_opts else 0,
-                    )
-                    novo_nf_label = st.selectbox(
-                        "NF vinculada", nf_labels_edit, index=nf_atual_idx, key=f"edit_nf_{cr_edit['id']}",
-                    )
-                    novo_ct_label = st.selectbox(
-                        "Contrato vinculado", ct_labels_edit, index=ct_atual_idx, key=f"edit_ct_{cr_edit['id']}",
-                    )
-                    nova_obs = st.text_area(
-                        "Observações", key=f"edit_obs_{cr_edit['id']}",
-                        value=cr_edit.get("observacoes") or "", height=80,
-                    )
-                    if st.form_submit_button("💾 Salvar alterações", use_container_width=True):
-                        if novo_valor is None:
-                            st.error("❌ Informe um valor válido antes de salvar.")
-                        else:
-                            update_credito(cr_edit["id"], {
-                                "valor_original":  float(novo_valor),
-                                "data_vencimento": str(novo_venc),
-                                "status":          novo_status,
-                                "nota_fiscal_id":  nf_opts_edit[novo_nf_label],
-                                "contrato_id":     ct_opts_edit[novo_ct_label],
-                                "observacoes":     nova_obs or None,
-                            })
-                            st.session_state["_edit_cred_ok"] = (
-                                f"✅ Crédito de {cr_edit.get('cliente_nome','?')} atualizado!"
-                            )
-                            _clear_and_rerun()
-
-                st.markdown("---")
-                movs_do_credito = [m for m in movs_all if m.get("credito_id") == cr_edit["id"]]
-                if movs_do_credito:
-                    st.warning(
-                        f"⚠️ Este crédito tem {len(movs_do_credito)} movimentação(ões) registrada(s). "
-                        f"Excluir apaga esse histórico de uso junto — normalmente é mais seguro "
-                        f"editar o valor/status acima do que excluir. Se ainda assim quiser apagar, "
-                        f"apague antes as movimentações (aba Movimentações) ou confirme abaixo."
-                    )
-                confirma_excluir = st.checkbox(
-                    "Confirmo que quero excluir este crédito permanentemente",
-                    key=f"confirma_del_cred_{cr_edit['id']}",
-                )
-                if st.button("🗑️ Excluir crédito", key=f"btn_del_cred_{cr_edit['id']}",
-                             disabled=not confirma_excluir):
-                    delete_credito(cr_edit["id"])
-                    st.session_state["_edit_cred_ok"] = (
-                        f"🗑️ Crédito de {cr_edit.get('cliente_nome','?')} excluído."
-                    )
-                    _clear_and_rerun()
-
-            # Expirar crédito individual
-            with st.expander("⏰ Expirar um crédito manualmente"):
-                validos_tab = [cr for cr in creds_tab if cr["status"] == "VÁLIDO"]
-                if validos_tab:
-                    opts_exp = {
-                        f"{cr.get('cliente_nome','?')} — {_nf_label(cr.get('numero_nf'))} (#{cr['id']})": cr["id"]
-                        for cr in validos_tab
-                    }
-                    sel_exp = st.selectbox("Crédito:", list(opts_exp.keys()), key="sel_exp")
-                    if st.button("⏰ Confirmar expiração", key="btn_exp"):
-                        update_credito(opts_exp[sel_exp], {"status": "EXPIRADO"})
-                        _clear_and_rerun()
-                else:
-                    st.info("Nenhum crédito válido para expirar.")
-
-    if cred_action == "➕ Novo Crédito":
-        # Confirmação do último cadastro — fica visível até a próxima ação
-        # (antes sumia junto com o rerun, e por não notar que já tinha
-        # funcionado, cadastros repetidos sem querer criavam créditos duplicados).
-        if st.session_state.get("_novo_cred_ok"):
-            st.success(st.session_state.pop("_novo_cred_ok"))
-
-        cli_opts_nc = {c["nome"]: c["id"] for c in clientes_all}
-        clic1, clic2 = st.columns(2)
-        cli_sel = clic1.selectbox(
-            "Cliente já cadastrado (clique e digite pra buscar)",
-            ["— Nenhum —"] + list(cli_opts_nc.keys()), key="cli_sel_novo_cred",
-        )
-        cli_novo = clic2.text_input(
-            "Ou nome de um cliente novo", placeholder="ex: Empresa XYZ Ltda",
-            help="Se o cliente ainda não está cadastrado, digite o nome aqui — ele é "
-                 "criado automaticamente junto com o crédito.",
-        )
-        cli_id_sel = cli_opts_nc.get(cli_sel) if cli_sel != "— Nenhum —" else None
-        notas_cl   = _nota_by_cli.get(cli_id_sel, []) if cli_id_sel else []
-        nf_opts    = {"— Sem NF —": None}
-        nf_opts.update({f"NF {n['numero_nf']}": n["id"] for n in notas_cl})
-
-        with st.form("form_novo_cred_dash", clear_on_submit=True):
-            c1, c2 = st.columns(2)
-            with c1:
-                valor, _ = _valor_input("Valor (R$) *", key="valor_novo_cred",
-                                         help="Digite o valor real do crédito antes de cadastrar.")
-            venc   = c2.date_input("Vencimento *", value=date.today() + timedelta(days=30),
-                                    help="Data até quando o crédito vale. Ajuste conforme o combinado com o cliente.")
-            nfc1, nfc2 = st.columns(2)
-            nf_sel  = nfc1.selectbox("NF já cadastrada (opcional)", list(nf_opts.keys()))
-            nf_nova = nfc2.text_input(
-                "Ou número de uma NF nova", placeholder="ex: 6640",
-                help="Se a NF ainda não existe no sistema, digite o número aqui — ela é "
-                     "criada e já vinculada a este crédito, sem precisar ir na aba Notas Fiscais antes.",
+                key=f"dl_extrato_{cli['id']}",
             )
 
-            with st.expander("➕ Mais detalhes (opcional)"):
-                obs = st.text_area("Observações", height=80)
-                contratos_flat = [
-                    ct for lst in _get_cont_by_cli().values() for ct in lst
-                    if ct.get("status_real") not in ("ENCERRADO", "RESCINDIDO")
-                ]
-                ct_opts = {"— Sem contrato —": None}
-                ct_opts.update({
-                    f"{ct.get('contratante','?')} ({ct.get('empresa_gg','—')}) · {ct.get('tipo_contrato','—')}": ct.get("id")
-                    for ct in contratos_flat
-                })
-                ct_sel = st.selectbox("Contrato vinculado", list(ct_opts.keys()))
-
-            if st.form_submit_button("➕ Cadastrar crédito", use_container_width=True):
-                if cli_sel == "— Nenhum —" and not cli_novo.strip():
-                    st.error("❌ Escolha um cliente já cadastrado ou digite o nome de um novo.")
-                elif cli_sel != "— Nenhum —" and cli_novo.strip():
-                    st.error("❌ Escolha um cliente já cadastrado OU digite um novo — não os dois.")
-                elif valor is None:
-                    st.error("❌ Informe um valor válido antes de cadastrar.")
-                elif valor < 1:
-                    st.error(f"❌ Valor muito baixo ({brl(valor)}). "
-                             f"Confirme se digitou o valor certo antes de cadastrar.")
-                elif nf_nova.strip() and nf_sel != "— Sem NF —":
-                    st.error("❌ Escolha uma NF já cadastrada OU digite uma nova — não os dois.")
-                else:
-                    cli_id_final = cli_id_sel
-                    cli_nome_final = cli_sel
-                    if cli_novo.strip():
-                        cli_id_final = insert_cliente({"nome": cli_novo.strip()})
-                        cli_nome_final = cli_novo.strip()
-
-                    nota_fiscal_id_sel = nf_opts[nf_sel]
-                    if nf_nova.strip():
-                        nota_fiscal_id_sel = insert_nota({
-                            "numero_nf":    nf_nova.strip(),
-                            "cliente_id":   cli_id_final,
-                            "data_emissao": str(date.today()),
-                            "valor_total":  float(valor),
-                        })
-                    payload = {
-                        "cliente_id":      cli_id_final,
-                        "nota_fiscal_id":  nota_fiscal_id_sel,
-                        "valor_original":  float(valor),
-                        "data_vencimento": str(venc),
-                        "observacoes":     obs or None,
-                        "contrato_id":     ct_opts[ct_sel],
-                    }
-                    try:
-                        insert_credito(payload)
-                        st.session_state["_novo_cred_ok"] = f"✅ Crédito de {brl(valor)} cadastrado para {cli_nome_final}!"
-                        _clear_and_rerun()
-                    except Exception as e:
-                        if "contrato_id" in str(e):
-                            # Coluna contrato_id ainda não existe na tabela do Supabase —
-                            # cadastra o crédito mesmo assim, só sem o vínculo com o contrato.
-                            try:
-                                payload.pop("contrato_id")
-                                insert_credito(payload)
-                                msg = f"✅ Crédito de {brl(valor)} cadastrado para {cli_nome_final}!"
-                                if ct_opts[ct_sel] is not None:
-                                    msg += (" ⚠️ O vínculo com o contrato não foi salvo — falta "
-                                             "uma coluna no banco (peça pra rodar a migração "
-                                             "pendente do Supabase).")
-                                st.session_state["_novo_cred_ok"] = msg
-                                _clear_and_rerun()
-                            except Exception as e2:
-                                st.error(f"❌ Não foi possível cadastrar o crédito: {e2}")
-                        else:
-                            st.error(f"❌ Não foi possível cadastrar o crédito: {e}")
-
-    if cred_action == "💸 Registrar Consumo":
-        if st.session_state.get("_consumo_ok"):
-            st.success(st.session_state.pop("_consumo_ok"))
-
-        # Aceita qualquer crédito com saldo, mesmo EXPIRADO — só CANCELADO fica
-        # de fora. Ver mesma regra no bloco de busca da aba Lista.
-        creds_validos = [
-            c for c in creditos_all
-            if c["status"] != "CANCELADO"
-            and ((c.get("valor_original") or 0) - (c.get("valor_utilizado") or 0)) > 0
-        ]
-        if not creds_validos:
-            st.info("Nenhum crédito com saldo disponível.")
-        else:
-            # Filtro por cliente primeiro, pra não ter que procurar num dropdown
-            # gigante com todo mundo junto.
-            cli_opts_consumo = {c["nome"]: c["id"] for c in clientes_all}
-            cli_f_consumo = st.selectbox("Cliente", ["Todos"] + list(cli_opts_consumo.keys()),
-                                          key="cli_f_consumo")
-            cli_id_f_consumo = cli_opts_consumo.get(cli_f_consumo) if cli_f_consumo != "Todos" else None
-            creds_filtrados = [c for c in creds_validos
-                                if not cli_id_f_consumo or c["cliente_id"] == cli_id_f_consumo]
-            if busca_nf:
-                termo_c = busca_nf.strip().lower()
-                creds_filtrados = [c for c in creds_filtrados
-                                    if termo_c in str(c.get("numero_nf") or "").lower()
-                                    or termo_c in str(c.get("cliente_nome") or "").lower()]
-
-            if not creds_filtrados:
-                st.info("Nenhum crédito válido para esse cliente.")
-            else:
-                # Rótulo inclui o id pra nunca colidir entre créditos "iguais"
-                # (mesmo cliente, mesma NF, mesmo saldo) — já vi isso acontecer.
-                opts = {
-                    f"{c.get('cliente_nome','?')} — {_nf_label(c.get('numero_nf'))} — "
-                    f"Saldo: {brl((c['valor_original'] or 0)-(c['valor_utilizado'] or 0))}"
-                    f"{' ⚠️ EXPIRADO' if c['status'] == 'EXPIRADO' else ''} (#{c['id']})": c
-                    for c in creds_filtrados
-                }
-                # Fora do form: selecionar outro crédito atualiza o saldo na hora,
-                # em vez de só mudar depois de enviar (o que já causou confusão de
-                # "saldo não bate" — a tela ficava mostrando o crédito anterior).
-                label = st.selectbox("Crédito *", list(opts.keys()), key="consumo_cred_sel")
-                cr    = opts[label]
-                _render_form_consumo(cr)
-
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 4 — MOVIMENTAÇÕES
-# ══════════════════════════════════════════════════════════════════════════════
-if main_tab == "📋 Movimentações":
-    import io
-    if st.session_state.get("_del_mov_ok"):
-        st.success(st.session_state.pop("_del_mov_ok"))
-
-    cli_opts = {c["nome"]: c["id"] for c in clientes_all}
-
-    col1, col2, col3 = st.columns(3)
-    tipo_f = col1.multiselect("Tipo", ["UTILIZAÇÃO","ESTORNO","AJUSTE"],
-                               default=["UTILIZAÇÃO","ESTORNO","AJUSTE"])
-    cli_f2 = col2.selectbox("Cliente", ["Todos"] + list(cli_opts.keys()), key="cli_f_movs")
-    busca2 = col3.text_input("🔎 Buscar responsável")
-
-    cli_id_f2 = cli_opts.get(cli_f2) if cli_f2 != "Todos" else None
-
-    # Filter in memory
-    movs_tab = movs_all
-    if cli_id_f2:
-        movs_tab = [m for m in movs_tab if _cred_to_cli.get(m.get("credito_id")) == cli_id_f2]
-
-    if not movs_tab:
-        st.info("Nenhuma movimentação registrada.")
-    else:
-        df_m = pd.DataFrame(movs_tab)
-        df_m["valor"] = pd.to_numeric(df_m["valor"], errors="coerce").fillna(0)
-        df_m["data"]  = pd.to_datetime(df_m["data"], errors="coerce")
-        if tipo_f:
-            df_m = df_m[df_m["tipo"].isin(tipo_f)]
-        if busca2:
-            df_m = df_m[df_m["responsavel"].fillna("").str.contains(busca2, case=False)]
-
-        st.markdown(f"**{len(df_m)} movimentação(ões) — Total: {brl(df_m['valor'].sum())}**")
-
-        for col_opt in ["descricao_servico","codigo_servico","qtd_amostras","valor_amostra"]:
-            if col_opt not in df_m.columns:
-                df_m[col_opt] = None
-
-        df_show = df_m[["data","tipo","cliente_nome","descricao_servico","codigo_servico",
-                         "qtd_amostras","valor_amostra","valor","responsavel","observacao"]].copy()
-        df_show["data"]          = df_show["data"].dt.strftime("%d/%m/%Y")
-        df_show["valor"]         = df_show["valor"].apply(brl)
-        df_show["valor_amostra"] = df_show["valor_amostra"].apply(
-            lambda v: brl(v) if pd.notna(v) and v else "—")
-        df_show["qtd_amostras"]  = df_show["qtd_amostras"].apply(
-            lambda v: str(int(v)) if pd.notna(v) and v else "—")
-        df_show.columns = ["Data","Tipo","Cliente","Serviço","Cód.","Amostras","Vl/Amostra","Total","Responsável","Obs."]
-        st.dataframe(df_show.fillna("—"), use_container_width=True, hide_index=True)
-
-        if st.button("📥 Exportar Excel", key="btn_export_movs"):
-            buf = io.BytesIO()
-            with pd.ExcelWriter(buf, engine="openpyxl") as writer:
-                df_show.to_excel(writer, index=False, sheet_name="Movimentações")
-            st.download_button("⬇️ Baixar movimentacoes.xlsx", data=buf.getvalue(),
-                               file_name="movimentacoes.xlsx",
-                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                               key="dl_movs")
-
-        with st.expander("🗑️ Apagar uma movimentação errada"):
-            movs_no_filtro = df_m.to_dict("records")
-            opts_del = {
-                f"{(m.get('data').strftime('%d/%m/%Y') if pd.notna(m.get('data')) else '—')} — "
-                f"{m.get('cliente_nome','?')} — {m.get('descricao_servico') or m.get('tipo','')} — "
-                f"{brl(m.get('valor'))} (#{m['id']})": m
-                for m in movs_no_filtro
+            pill_map = {
+                "ENTRADA":    ("Entrada", "#159A73", "#E1F6EE"),
+                "UTILIZAÇÃO": ("Saída",   "#D6304A", "#FBE7EA"),
+                "USO":        ("Saída",   "#D6304A", "#FBE7EA"),
+                "ESTORNO":    ("Estorno", "#159A73", "#E1F6EE"),
+                "AJUSTE":     ("Ajuste",  "#B4720A", "#FCEFD9"),
             }
-            sel_del_label = st.selectbox("Movimentação:", list(opts_del.keys()), key="sel_del_mov")
-            mov_del = opts_del[sel_del_label]
-            st.caption("Isso também devolve o valor pro saldo do crédito (desfaz o consumo).")
-            if st.button("🗑️ Confirmar exclusão", key="btn_del_mov"):
-                cred = next((c for c in creditos_all if c["id"] == mov_del.get("credito_id")), None)
-                if cred and mov_del.get("tipo") in ("UTILIZAÇÃO", "USO"):
-                    novo_ut = max(0, (cred.get("valor_utilizado") or 0) - (mov_del.get("valor") or 0))
-                    novo_st = "VÁLIDO" if novo_ut < (cred.get("valor_original") or 0) else cred.get("status")
-                    update_credito(cred["id"], {"valor_utilizado": novo_ut, "status": novo_st})
-                delete_movimentacao(mov_del["id"])
-                st.session_state["_del_mov_ok"] = "✅ Movimentação apagada e saldo do crédito corrigido."
-                _clear_and_rerun()
+            for l in linhas:
+                label_p, cor_p, fundo_p = pill_map.get(l["tipo"], (l["tipo"], "#6E5A93", "#EDE9F8"))
+                try:
+                    data_fmt = pd.to_datetime(l["data"]).strftime("%d/%m/%Y")
+                except Exception:
+                    data_fmt = l["data"] or "—"
+                sinal_txt  = "+" if l["valor"] >= 0 else ""
+                cor_valor  = "#159A73" if l["valor"] >= 0 else "#D6304A"
+
+                lcol1, lcol2, lcol3, lcol4 = st.columns([1, 5, 1.6, 0.5])
+                lcol1.caption(data_fmt)
+                with lcol2:
+                    st.markdown(
+                        f"<span style='background:{fundo_p};color:{cor_p};font-size:.68rem;"
+                        f"font-weight:700;border-radius:20px;padding:2px 9px;margin-right:6px'>{label_p}</span>"
+                        f"{l['desc']}", unsafe_allow_html=True)
+                    if l["sub"]:
+                        st.caption(l["sub"])
+                lcol3.markdown(
+                    f"<div style='text-align:right;font-family:monospace;color:{cor_valor}'>"
+                    f"{sinal_txt}{brl(l['valor'])}</div>", unsafe_allow_html=True)
+                if l["mov"] is not None:
+                    if lcol4.button("🗑️", key=f"del_mov_{l['mov']['id']}", help="Apagar movimentação"):
+                        _abrir_dialog_del_mov(l["mov"])
+                st.markdown("<hr style='margin:4px 0;border-color:#EAE6F4'>", unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# TAB 5 — RELATÓRIO MENSAL
+# TAB 3 — RELATÓRIO MENSAL
 # ══════════════════════════════════════════════════════════════════════════════
 if main_tab == "📑 Relatório Mensal":
     from utils import MESES_PT
