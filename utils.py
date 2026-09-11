@@ -598,22 +598,33 @@ def load_bling_vencidas() -> dict:
 # ── Helpers unificados (eGestor + Bling) ──────────────────────────────────────
 
 @st.cache_data(ttl=120, show_spinner=False)
-def get_empresas_disponiveis() -> list:
-    """Retorna a lista de empresas disponíveis: sempre eGestor + Bling se conectado.
+def get_bling_connection_error() -> Optional[str]:
+    """Retorna None se o Bling está conectado, ou o motivo da falha.
 
-    Cacheado por 2min — is_connected() faz uma chamada de rede real (GET na
-    API do Bling, com retry+sleep em 429) e essa função era chamada sem cache
-    em TODA página com filtro de empresa (Faturamento, Vendas, Contas, Mensal,
-    Fluxo, Realizado) — ou seja, em toda interação do usuário nessas 6 páginas
-    (qualquer widget, não só o botão de refresh). Sem cache, o pior caso é uma
-    chamada de ~15s (timeout) + 2 retries de 3s cada, TODA vez. Como o botão
+    Cacheado por 2min pelo mesmo motivo do get_empresas_disponiveis() logo
+    abaixo: bling_auth.connection_error() faz uma chamada de rede real (GET
+    na API do Bling, timeout de 15s + até 2 retries de 3s em 429) e era
+    chamada sem cache direto na Home (app.py, sidebar) e em pages/10_You.py —
+    ou seja, em toda abertura do sistema e toda troca de aba/widget nessas
+    duas telas, até ~21s de pior caso a cada rerun. Como o botão
     "🔄 Atualizar dados" já chama st.cache_data.clear(), ele também limpa isso."""
     try:
         import bling_auth
-        if bling_auth.is_connected():
-            return NOMES + [NOME_YOU]
-    except Exception:
-        pass
+        return bling_auth.connection_error()
+    except Exception as e:
+        return f"Erro ao verificar conexão: {e}"
+
+
+@st.cache_data(ttl=120, show_spinner=False)
+def get_empresas_disponiveis() -> list:
+    """Retorna a lista de empresas disponíveis: sempre eGestor + Bling se conectado.
+
+    Reusa o cache de get_bling_connection_error() acima em vez de chamar
+    bling_auth.is_connected() por conta própria, pra não disparar uma segunda
+    chamada de rede real quando as duas funções são usadas na mesma janela
+    de 2min (ex.: Home carrega uma, outra página carrega a outra)."""
+    if get_bling_connection_error() is None:
+        return NOMES + [NOME_YOU]
     return list(NOMES)
 
 

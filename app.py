@@ -4,7 +4,7 @@ from datetime import date
 from utils import (GLOBAL_CSS, ASSETS, BRAND, NOMES, TODOS_NOMES, NOME_YOU,
                    CHART_COLORS, brl, soma, kpi_card, plotly_layout,
                    get_clients, load_company_data, load_bling_data,
-                   sidebar_header, get_authenticator)
+                   sidebar_header, get_authenticator, get_bling_connection_error)
 import bling_auth
 
 st.set_page_config(
@@ -67,7 +67,7 @@ with st.sidebar:
 
     # Status Bling / GoGenetic You
     st.markdown("**🧬 GoGenetic You (Bling)**")
-    _bling_erro = bling_auth.connection_error()
+    _bling_erro = get_bling_connection_error()
     if _bling_erro is None:
         st.success("✅ Conectada")
         if st.button("🔌 Desconectar", use_container_width=True):

@@ -6,7 +6,8 @@ import pandas as pd
 import plotly.express as px
 from datetime import date, timedelta
 from utils import (GLOBAL_CSS, BRAND, brl, kpi_card, plotly_layout,
-                    sidebar_header, tabela_marcavel, get_bling_client, load_bling_data)
+                    sidebar_header, tabela_marcavel, get_bling_client, load_bling_data,
+                    get_bling_connection_error)
 import bling_auth
 
 st.set_page_config(page_title="GoGenetic You | GoGenetic", page_icon="🧬", layout="wide")
@@ -62,7 +63,7 @@ tab_bling, tab_guru, tab_asaas = st.tabs(["🔗 Bling", "🛒 Guru", "💳 Asaas
 # ABA BLING
 # ══════════════════════════════════════════════════════════════════════════════
 with tab_bling:
-    erro = bling_auth.connection_error()
+    erro = get_bling_connection_error()
     if erro:
         st.warning("⚠️ Bling não conectado.")
         st.caption(f"Motivo: {erro}")
