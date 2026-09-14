@@ -439,6 +439,26 @@ def save_metas(ano: int, metas: dict):
     METAS_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False))
 
 
+# ── Arquivamento de dados históricos ──────────────────────────────────────────
+# Anos/períodos já fechados (antes do ano corrente) não mudam mais — a
+# primeira busca arquiva o resultado pra sempre (Supabase/SQLite, ver
+# db_dados_arquivados.py) e as próximas leituras nunca mais batem na API do
+# eGestor/Bling pra esse mesmo intervalo. Só o ano corrente continua "ao
+# vivo" (sempre busca na API, respeitando o cache normal de 15min/1h). Como
+# a checagem usa o ano de hoje, isso rola automaticamente: em jan/2027 o ano
+# de 2026 também passa a ser tratado como fechado, sem precisar mexer em
+# nada.
+
+def _ano_fechado(ano: int) -> bool:
+    return ano < date.today().year
+
+
+def _periodo_fechado(dt_fim: str) -> bool:
+    """Um período está "fechado" quando termina antes do ano corrente começar
+    — ou seja, não tem nenhum dia dentro do ano em andamento."""
+    return dt_fim < f"{date.today().year}-01-01"
+
+
 # ── API clients ────────────────────────────────────────────────────────────────
 
 @st.cache_resource
@@ -454,7 +474,20 @@ def get_clients() -> dict:
 
 @st.cache_data(ttl=900, show_spinner=False)
 def load_company_data(nome: str, dt_ini: str, dt_fim: str) -> dict:
-    """Carrega os 4 endpoints em paralelo para reduzir latência."""
+    """Carrega os 4 endpoints em paralelo para reduzir latência.
+
+    Período inteiramente dentro de um ano já fechado: primeiro tenta o
+    arquivo permanente (ver "Arquivamento de dados históricos" acima); só
+    bate na API do eGestor se ainda não tiver sido arquivado, e nesse caso
+    arquiva o resultado em seguida."""
+    import db_dados_arquivados
+    fechado = _periodo_fechado(dt_fim)
+    chave = f"periodo:{dt_ini}:{dt_fim}"
+    if fechado:
+        arquivado = db_dados_arquivados.get_arquivado(nome, chave)
+        if arquivado is not None:
+            return arquivado
+
     from concurrent.futures import ThreadPoolExecutor
     client = get_clients()[nome]
     _empty = {"vendas": [], "faturamento": [], "contas_receber": [], "contas_pagar": []}
@@ -464,7 +497,7 @@ def load_company_data(nome: str, dt_ini: str, dt_fim: str) -> dict:
             ff = ex.submit(client.get_faturamento,     dt_ini, dt_fim)
             fr = ex.submit(client.get_contas_receber,  dt_ini, dt_fim)
             fp = ex.submit(client.get_contas_pagar,    dt_ini, dt_fim)
-        return {
+        resultado = {
             "vendas":         fv.result(),
             "faturamento":    ff.result(),
             "contas_receber": fr.result(),
@@ -473,6 +506,10 @@ def load_company_data(nome: str, dt_ini: str, dt_fim: str) -> dict:
     except Exception as exc:
         st.error(f"Erro ao carregar {nome}: {exc}")
         return _empty
+
+    if fechado and any(resultado.values()):
+        db_dados_arquivados.salvar_arquivado(nome, chave, resultado)
+    return resultado
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -490,11 +527,25 @@ def load_vencidas(nome: str) -> dict:
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def load_vendas_ano(nome: str, ano: int) -> list:
+    """Vendas do ano inteiro. Ano já fechado (anterior ao corrente): arquivado
+    pra sempre na primeira busca (ver "Arquivamento de dados históricos" acima)."""
+    import db_dados_arquivados
+    fechado = _ano_fechado(ano)
+    chave = f"vendas_ano:{ano}"
+    if fechado:
+        arquivado = db_dados_arquivados.get_arquivado(nome, chave)
+        if arquivado is not None:
+            return arquivado
+
     client = get_clients()[nome]
     try:
-        return client.get_vendas(f"{ano}-01-01", f"{ano}-12-31")
+        vendas = client.get_vendas(f"{ano}-01-01", f"{ano}-12-31")
     except Exception:
-        return []
+        vendas = []
+
+    if fechado and vendas:
+        db_dados_arquivados.salvar_arquivado(nome, chave, vendas)
+    return vendas
 
 
 # ── Bling (GoGenetic You) ──────────────────────────────────────────────────────
@@ -537,6 +588,16 @@ def reset_bling_client():
 
 @st.cache_data(ttl=900, show_spinner=False)
 def load_bling_data(dt_ini: str, dt_fim: str) -> dict:
+    """Período inteiramente dentro de um ano já fechado: mesmo arquivamento
+    permanente usado em load_company_data (ver comentário lá)."""
+    import db_dados_arquivados
+    fechado = _periodo_fechado(dt_fim)
+    chave = f"periodo:{dt_ini}:{dt_fim}"
+    if fechado:
+        arquivado = db_dados_arquivados.get_arquivado(NOME_YOU, chave)
+        if arquivado is not None:
+            return arquivado
+
     from concurrent.futures import ThreadPoolExecutor
     client = get_bling_client()
     _empty = {"vendas": [], "faturamento": [], "contas_receber": [], "contas_pagar": []}
@@ -557,7 +618,7 @@ def load_bling_data(dt_ini: str, dt_fim: str) -> dict:
                 return True
             return dt_ini <= str(venc)[:10] <= dt_fim
 
-        return {
+        resultado = {
             "vendas":         [BlingClient.normaliza_venda(v) for v in vendas_raw],
             "faturamento":    [BlingClient.normaliza_conta(v) for v in fat_raw],
             "contas_receber": [BlingClient.normaliza_conta(v) for v in rec_raw if _dentro(v)],
@@ -567,17 +628,35 @@ def load_bling_data(dt_ini: str, dt_fim: str) -> dict:
         st.error(f"Erro Bling: {exc}")
         return _empty
 
+    if fechado and any(resultado.values()):
+        db_dados_arquivados.salvar_arquivado(NOME_YOU, chave, resultado)
+    return resultado
+
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def load_bling_vendas_ano(ano: int) -> list:
+    """Mesmo arquivamento permanente de load_vendas_ano (ver comentário lá),
+    pro ano já fechado."""
+    import db_dados_arquivados
+    fechado = _ano_fechado(ano)
+    chave = f"vendas_ano:{ano}"
+    if fechado:
+        arquivado = db_dados_arquivados.get_arquivado(NOME_YOU, chave)
+        if arquivado is not None:
+            return arquivado
+
     client = get_bling_client()
     if not client:
         return []
     try:
         from bling_api import BlingClient
-        return [BlingClient.normaliza_venda(v) for v in client.get_vendas_ano(ano)]
+        vendas = [BlingClient.normaliza_venda(v) for v in client.get_vendas_ano(ano)]
     except Exception:
-        return []
+        vendas = []
+
+    if fechado and vendas:
+        db_dados_arquivados.salvar_arquivado(NOME_YOU, chave, vendas)
+    return vendas
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
