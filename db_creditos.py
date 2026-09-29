@@ -49,3 +49,7 @@ def list_movimentacoes(*a, **kw):  return _backend_mod().list_movimentacoes(*a, 
 def insert_movimentacao(*a, **kw): return _backend_mod().insert_movimentacao(*a, **kw)
 def get_movimentacao(*a, **kw):    return _backend_mod().get_movimentacao(*a, **kw)
 def delete_movimentacao(*a, **kw): return _backend_mod().delete_movimentacao(*a, **kw)
+
+def list_auto_log(*a, **kw):       return _backend_mod().list_auto_log(*a, **kw)
+def claim_auto_log(*a, **kw):      return _backend_mod().claim_auto_log(*a, **kw)
+def update_auto_log(*a, **kw):     return _backend_mod().update_auto_log(*a, **kw)

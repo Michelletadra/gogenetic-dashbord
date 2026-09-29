@@ -61,7 +61,31 @@ def init_db():
             observacao  TEXT,
             created_at  TEXT DEFAULT (datetime('now','localtime'))
         );
+
+        -- Registro das baixas automáticas vindas do eGestor (uma linha por
+        -- pedido/OS). Serve de trava contra baixa em dobro e de memória:
+        -- se alguém apagar a movimentação automática, o pedido NÃO é baixado
+        -- de novo, porque continua marcado aqui como 'baixado'.
+        CREATE TABLE IF NOT EXISTS creditos_auto_log (
+            empresa        TEXT NOT NULL,
+            codigo         TEXT NOT NULL,
+            status         TEXT NOT NULL,
+            cliente_id     INTEGER,
+            nome_contato   TEXT,
+            valor          REAL,
+            dt_venda       TEXT,
+            situacao       TEXT,
+            detalhe        TEXT,
+            atualizado_em  TEXT DEFAULT (datetime('now')),
+            PRIMARY KEY (empresa, codigo)
+        );
         """)
+        # Colunas de rastreabilidade do serviço (já existem no Supabase de
+        # produção; aqui no SQLite de dev são adicionadas se faltarem).
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(movimentacoes)")}
+        for col in ("descricao_servico", "codigo_servico", "servico_empresa", "origem"):
+            if col not in cols:
+                conn.execute(f"ALTER TABLE movimentacoes ADD COLUMN {col} TEXT")
 
 # ── Clientes ──────────────────────────────────────────────────────────────────
 def list_clientes(busca: str = None):
@@ -208,9 +232,12 @@ def list_movimentacoes(credito_id: int = None, cliente_id: int = None):
 def insert_movimentacao(data: dict) -> int:
     with _conn() as conn:
         cur = conn.execute(
-            "INSERT INTO movimentacoes (credito_id,tipo,valor,data,responsavel,observacao) VALUES (?,?,?,?,?,?)",
+            "INSERT INTO movimentacoes (credito_id,tipo,valor,data,responsavel,observacao,"
+            "descricao_servico,codigo_servico,servico_empresa,origem) VALUES (?,?,?,?,?,?,?,?,?,?)",
             (data["credito_id"], data["tipo"], data["valor"],
-             data.get("data"), data.get("responsavel"), data.get("observacao"))
+             data.get("data"), data.get("responsavel"), data.get("observacao"),
+             data.get("descricao_servico"), data.get("codigo_servico"),
+             data.get("servico_empresa"), data.get("origem"))
         )
         return cur.lastrowid
 
@@ -222,6 +249,40 @@ def get_movimentacao(id):
 def delete_movimentacao(id):
     with _conn() as conn:
         conn.execute("DELETE FROM movimentacoes WHERE id=?", (id,))
+
+# ── Baixa automática (eGestor) ────────────────────────────────────────────────
+def list_auto_log(status: list = None):
+    with _conn() as conn:
+        sql, params = "SELECT * FROM creditos_auto_log", []
+        if status:
+            sql += f" WHERE status IN ({','.join('?' * len(status))})"
+            params = list(status)
+        rows = conn.execute(sql + " ORDER BY atualizado_em DESC", params).fetchall()
+    return [dict(r) for r in rows]
+
+def claim_auto_log(empresa: str, codigo: str, reclaim_min: int = 30) -> bool:
+    """Reserva o pedido pra esta execução. True = pode processar. Só consegue
+    reservar se o pedido é novo, se estava 'pendente' (tenta de novo), ou se
+    ficou 'processando' travado há mais de `reclaim_min` minutos."""
+    with _conn() as conn:
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO creditos_auto_log (empresa,codigo,status) VALUES (?,?,'processando')",
+            (empresa, codigo))
+        if cur.rowcount:
+            return True
+        cur = conn.execute(
+            "UPDATE creditos_auto_log SET status='processando', atualizado_em=datetime('now') "
+            "WHERE empresa=? AND codigo=? AND (status='pendente' OR (status='processando' "
+            "AND atualizado_em < datetime('now', ?)))",
+            (empresa, codigo, f"-{int(reclaim_min)} minutes"))
+        return cur.rowcount > 0
+
+def update_auto_log(empresa: str, codigo: str, data: dict):
+    data = {**data}
+    sets = ", ".join(f"{k}=?" for k in data) + ", atualizado_em=datetime('now')"
+    with _conn() as conn:
+        conn.execute(f"UPDATE creditos_auto_log SET {sets} WHERE empresa=? AND codigo=?",
+                     list(data.values()) + [empresa, codigo])
 
 # ── Resumo por cliente ────────────────────────────────────────────────────────
 def resumo_cliente(cliente_id: int) -> dict:

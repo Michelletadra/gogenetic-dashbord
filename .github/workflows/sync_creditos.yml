@@ -1,0 +1,43 @@
+# Baixa automática de créditos: de hora em hora, procura no eGestor serviços
+# com a situação "Consumo de crédito" e dá baixa nas carteiras (Supabase).
+# Lógica em creditos_sync.py. Os logs mostram só contagens (repo é público).
+#
+# Secrets necessários (GitHub → Settings → Secrets and variables → Actions):
+#   SUPABASE_URL, SUPABASE_KEY,
+#   GOGENETIC_PESQUISA_TOKEN, GOGENETIC_SOLUCOES_TOKEN, GOSOLOS_TOKEN
+# Opcionais: GOGENETIC_PESQUISA_NOME, GOGENETIC_SOLUCOES_NOME, GOSOLOS_NOME
+#   (só se os nomes das empresas no dashboard forem diferentes do padrão)
+name: Baixa automática de créditos (eGestor)
+
+on:
+  schedule:
+    - cron: "17 * * * *"   # todo hora, no minuto 17 (UTC)
+  workflow_dispatch: {}      # botão "Run workflow" pra rodar na hora
+
+concurrency:
+  group: sync-creditos
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Instalar dependências
+        run: pip install requests python-dotenv supabase
+      - name: Sincronizar
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          GOGENETIC_PESQUISA_TOKEN: ${{ secrets.GOGENETIC_PESQUISA_TOKEN }}
+          GOGENETIC_SOLUCOES_TOKEN: ${{ secrets.GOGENETIC_SOLUCOES_TOKEN }}
+          GOSOLOS_TOKEN: ${{ secrets.GOSOLOS_TOKEN }}
+          GOGENETIC_PESQUISA_NOME: ${{ secrets.GOGENETIC_PESQUISA_NOME }}
+          GOGENETIC_SOLUCOES_NOME: ${{ secrets.GOGENETIC_SOLUCOES_NOME }}
+          GOSOLOS_NOME: ${{ secrets.GOSOLOS_NOME }}
+          CREDITO_SYNC_DIAS: "365"
+        run: python creditos_sync.py

@@ -118,6 +118,45 @@ def get_movimentacao(id):
 def delete_movimentacao(id):
     _sb().table("movimentacoes").delete().eq("id", id).execute()
 
+# ── Baixa automática (eGestor) ────────────────────────────────────────────────
+# Tabela creditos_auto_log — DDL em sql_creditos_auto.sql.
+def list_auto_log(status=None):
+    q = _sb().table("creditos_auto_log").select("*").order("atualizado_em", desc=True)
+    if status:
+        q = q.in_("status", list(status))
+    return q.execute().data
+
+def claim_auto_log(empresa, codigo, reclaim_min=30) -> bool:
+    from datetime import datetime, timedelta, timezone
+    agora = datetime.now(timezone.utc)
+    try:
+        _sb().table("creditos_auto_log").insert({
+            "empresa": empresa, "codigo": codigo, "status": "processando",
+            "atualizado_em": agora.isoformat(),
+        }).execute()
+        return True
+    except Exception:
+        pass  # já existe (chave primária) — tenta reaproveitar abaixo
+    r = (_sb().table("creditos_auto_log")
+         .update({"status": "processando", "atualizado_em": agora.isoformat()})
+         .eq("empresa", empresa).eq("codigo", codigo).eq("status", "pendente")
+         .execute())
+    if r.data:
+        return True
+    limite = (agora - timedelta(minutes=reclaim_min)).isoformat()
+    r = (_sb().table("creditos_auto_log")
+         .update({"status": "processando", "atualizado_em": agora.isoformat()})
+         .eq("empresa", empresa).eq("codigo", codigo).eq("status", "processando")
+         .lt("atualizado_em", limite)
+         .execute())
+    return bool(r.data)
+
+def update_auto_log(empresa, codigo, data):
+    from datetime import datetime, timezone
+    payload = {**data, "atualizado_em": datetime.now(timezone.utc).isoformat()}
+    (_sb().table("creditos_auto_log").update(payload)
+     .eq("empresa", empresa).eq("codigo", codigo).execute())
+
 # ── Resumo por cliente ────────────────────────────────────────────────────────
 def resumo_cliente(cliente_id) -> dict:
     creds = list_creditos(cliente_id=cliente_id)
