@@ -208,6 +208,13 @@ def sincronizar(clients: dict, dias: int = 90, hoje: date | None = None) -> dict
     clientes = db.list_clientes()
     creditos = db.list_creditos()
     movs = db.list_movimentacoes()
+    # Pedidos que alguém já lançou À MÃO pelo "Usar crédito" (que grava o
+    # código do pedido e a empresa). Esses NUNCA são baixados de novo.
+    ja_lancados_manual = set()
+    for m in movs:
+        cod = str(m.get("codigo_servico") or "").strip()
+        if cod and m.get("origem") != ORIGEM_AUTO:
+            ja_lancados_manual.add((chave_empresa(m.get("servico_empresa") or ""), cod))
     saldos = _saldos_por_credito(creditos, movs)
     cred_por_cli = {}
     for c in creditos:
@@ -236,6 +243,13 @@ def sincronizar(clients: dict, dias: int = 90, hoje: date | None = None) -> dict
             resumo["pendentes"] += 1
 
         try:
+            if (empresa, codigo) in ja_lancados_manual:
+                db.update_auto_log(empresa, codigo, {
+                    **info, "status": "baixado",
+                    "detalhe": "Já tinha consumo lançado manualmente para este pedido — nada descontado de novo",
+                })
+                resumo["ja_processados"] += 1
+                continue
             if valor <= 0:
                 _pendente("Pedido com valor zero no eGestor")
                 continue
