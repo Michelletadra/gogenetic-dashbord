@@ -316,8 +316,10 @@ if __name__ == "__main__":
     dias = int(_cfg("CREDITO_SYNC_DIAS", "365"))
     clients = clients_from_env()
     if not clients:
-        print("Nenhum token do eGestor configurado.")
-        sys.exit(1)
+        # Sem os Secrets do GitHub ainda: não é erro (não gera e-mail de falha).
+        # A baixa continua acontecendo pelo dashboard (ao abrir a tela/botão).
+        print("Secrets do eGestor/Supabase não cadastrados no GitHub — rotina horária desligada por enquanto.")
+        sys.exit(0)
     r = sincronizar(clients, dias=dias)
     # Só contagens — nada de nomes de clientes ou valores (logs são públicos).
     print(f"Empresas lidas: {len(clients)} | pedidos com a situação: {r['encontrados']} | "

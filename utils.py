@@ -23,8 +23,42 @@ CREDENTIALS = {
         "eduardo":  {"name": "Eduardo Balsanelli",    "email": "balsanelli@gogenetic.com.br",    "password": _HASH},
         "amanda":   {"name": "Amanda Mara S. Souza",  "email": "amanda@gogenetic.com.br",        "password": _HASH},
         "hirwigy":  {"name": "Hirwigy",               "email": "hirwigy@gogenetic.com.br",       "password": _HASH},
+        "vinicius": {"name": "Vinicius",              "email": "",                               "password": "$2b$12$3O2nlsvNyeBLPnJnWdGTnucocwWv8zzAIGfhPJCDkkpPVL6Gt6ag2"},
     }
 }
+
+# ── Acesso restrito por usuário ───────────────────────────────────────────────
+# Usuários aqui só enxergam as páginas listadas (nome do arquivo em pages/).
+# Qualquer outra página — inclusive a Home — redireciona para a primeira da
+# lista, e o menu lateral mostra só as permitidas. Quem não está aqui vê tudo.
+ACESSO_RESTRITO = {
+    "vinicius": ["6_Creditos.py"],   # 2026-10-07 — ajuda a Michelle nas baixas de crédito
+}
+
+
+def _pagina_atual() -> str:
+    """Arquivo da página que está rodando (ex. '6_Creditos.py' ou 'app.py')."""
+    import inspect
+    for fr in inspect.stack():
+        caminho = Path(fr.filename)
+        if caminho.parent.name == "pages" or caminho.name == "app.py":
+            return caminho.name
+    return ""
+
+
+def _aplicar_restricao():
+    usuario = (st.session_state.get("username") or "").lower()
+    permitidas = ACESSO_RESTRITO.get(usuario)
+    if not permitidas:
+        return
+    # Esconde o menu padrão e mostra só os atalhos permitidos.
+    st.markdown("<style>[data-testid='stSidebarNav']{display:none}</style>", unsafe_allow_html=True)
+    if _pagina_atual() not in permitidas:
+        try:
+            st.switch_page(f"pages/{permitidas[0]}")
+        except Exception:
+            st.error("🔒 Seu acesso é só à área de Créditos.")
+            st.stop()
 
 def get_authenticator() -> stauth.Authenticate:
     if "_authenticator" not in st.session_state:
@@ -52,6 +86,7 @@ def require_auth():
     if not st.session_state.get("authentication_status"):
         st.error("🔒 Faça login na página inicial para acessar o dashboard.")
         st.stop()
+    _aplicar_restricao()
 
 load_dotenv()
 
@@ -375,6 +410,13 @@ def sidebar_header(logo_path: Optional[str] = None):
             "<hr style='border:none;border-top:1px solid rgba(126,22,184,0.2);margin:12px 0 16px 0'>",
             unsafe_allow_html=True,
         )
+        _perm = ACESSO_RESTRITO.get((st.session_state.get("username") or "").lower())
+        if _perm:
+            for _pg in _perm:
+                try:
+                    st.page_link(f"pages/{_pg}", label="💳 Créditos" if "Creditos" in _pg else _pg)
+                except Exception:
+                    pass
         nome = st.session_state.get("name", "")
         st.caption(f"👤 {nome}")
         get_authenticator().logout("Sair", location="sidebar")
