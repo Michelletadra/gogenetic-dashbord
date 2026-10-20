@@ -42,6 +42,10 @@ def _cfg(key: str, default: str) -> str:
         return default
 
 
+def baixa_automatica_ligada() -> bool:
+    return _cfg("CREDITOS_AUTO_BAIXA", "1").strip().lower() not in ("0", "false", "nao", "não", "off")
+
+
 def situacao_gatilho() -> str:
     """Nome da situação no eGestor que dispara a baixa (sem acento, minúsculo)."""
     return normalizar(_cfg("CREDITO_SITUACAO_GATILHO", "consumo de credito"))
@@ -188,6 +192,11 @@ def sincronizar(clients: dict, dias: int = 90, hoje: date | None = None) -> dict
     gatilho = situacao_gatilho()
     resumo = {"encontrados": 0, "baixados": 0, "pendentes": 0, "ja_processados": 0,
               "valor_baixado": 0.0, "erros": []}
+    # Chave de segurança (Fase 1): em homologação/testes, CREDITOS_AUTO_BAIXA=0
+    # impede qualquer baixa. Sem a variável (produção hoje) nada muda.
+    if not baixa_automatica_ligada():
+        resumo["erros"].append("baixa automática desligada neste ambiente (CREDITOS_AUTO_BAIXA=0)")
+        return resumo
 
     dt_ini = (hoje - timedelta(days=dias)).isoformat()
     dt_fim = (hoje + timedelta(days=1)).isoformat()

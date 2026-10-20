@@ -17,7 +17,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from utils import (
+from utils import (mostrar_avisos_integracao, 
     BRAND,
     GLOBAL_CSS,
     MESES_PT,
@@ -329,6 +329,8 @@ df_periodo = _to_df(periodo_raw)
 df_mes     = _to_df(mes_raw)
 df_doze    = _to_df(doze_raw)
 
+
+mostrar_avisos_integracao(empresas_egestor + ([NOME_YOU] if inclui_bling else []))
 
 # ── KPIs ──────────────────────────────────────────────────────────────────────
 def _sum_df(df: pd.DataFrame, d_ini: date, d_fim: date) -> float:

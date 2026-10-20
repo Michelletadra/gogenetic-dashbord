@@ -7,8 +7,10 @@ import plotly.express as px
 from datetime import date, timedelta
 from utils import (GLOBAL_CSS, BRAND, brl, kpi_card, plotly_layout,
                     sidebar_header, tabela_marcavel, get_bling_client, load_bling_data,
-                    get_bling_connection_error)
+                    get_bling_connection_error, mostrar_avisos_integracao, falhas_integracao,
+                    ultima_atualizacao, NOME_YOU)
 import bling_auth
+from http_seguro import ErroIntegracao
 
 st.set_page_config(page_title="GoGenetic You | GoGenetic", page_icon="🧬", layout="wide")
 st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
@@ -72,7 +74,18 @@ with tab_bling:
         with st.spinner("Carregando dados do Bling..."):
             dados = load_bling_data(dt_ini_s, dt_fim_s)
         vendas, fat, rec, pag = dados["vendas"], dados["faturamento"], dados["contas_receber"], dados["contas_pagar"]
+        _falha_bling = [f for f in falhas_integracao([NOME_YOU]) if f["chave"] == f"periodo:{dt_ini_s}:{dt_fim_s}"]
+        _sem_dados_validos = bool(_falha_bling) and not _falha_bling[0]["ultimo_ok_em"]
+        if _falha_bling:
+            mostrar_avisos_integracao([NOME_YOU])
+            if bling_auth.aviso_persistencia():
+                st.caption(f"🔑 {bling_auth.aviso_persistencia()}")
 
+    if not erro and _sem_dados_validos:
+        st.error("❌ Não foi possível consultar o Bling para este período. Os indicadores não são "
+                 "exibidos para não mostrar R$ 0,00 como se fosse verdade. Tente \"🔄 Atualizar dados\" "
+                 "em alguns minutos; se persistir, reconecte o Bling na página inicial.")
+    elif not erro:
         total_v = sum(float(v.get("valorTotal") or 0) for v in vendas)
         total_f = sum(float(v.get("valor") or 0) for v in fat)
         total_r = sum(float(v.get("valor") or 0) for v in rec)
@@ -84,6 +97,9 @@ with tab_bling:
         kpi_card(c3, "📥", "A Receber", brl(total_r), f"{len(rec)} títulos",   border=f"{BRANDY['primary']}40")
         kpi_card(c4, "📤", "A Pagar",   brl(total_p), f"{len(pag)} títulos",   border=f"{BRANDY['primary']}40")
 
+        _ult = ultima_atualizacao(NOME_YOU, f"periodo:{dt_ini_s}:{dt_fim_s}")
+        if _ult:
+            st.caption(f"Fonte: Bling (GoGenetic You) · última consulta válida: {_ult.strftime('%d/%m/%Y %H:%M')}")
         st.markdown("<br>", unsafe_allow_html=True)
         if vendas:
             df_v = pd.DataFrame(vendas)
@@ -167,14 +183,27 @@ with tab_guru:
     if not _secret("GURU_API_TOKEN"):
         st.warning("⚠️ Token do Guru não configurado (GURU_API_TOKEN).")
     else:
-        with st.spinner("Carregando dados do Guru..."):
-            txs = _load_guru(dt_ini_s, dt_fim_s)
+        try:
+            with st.spinner("Carregando dados do Guru..."):
+                txs = _load_guru(dt_ini_s, dt_fim_s)
+            _erro_guru = None
+        except ErroIntegracao as _e:
+            txs, _erro_guru = None, _e
 
-        import db_guru_seen
-        seen_ids = db_guru_seen.get_seen_ids()
-        novos = [t for t in txs if str(t["codigo"]) not in seen_ids]
+        if _erro_guru is not None:
+            st.error(f"❌ Não foi possível consultar o Guru agora — os números não são exibidos para "
+                     f"não parecer que não houve vendas. Motivo: {_erro_guru}")
+            txs = []
+            novos = []
+        else:
+            import db_guru_seen
+            seen_ids = db_guru_seen.get_seen_ids()
+            novos = [t for t in txs if str(t["codigo"]) not in seen_ids]
         if novos:
-            pagamentos_asaas = _load_asaas_recente()
+            try:
+                pagamentos_asaas = _load_asaas_recente()
+            except ErroIntegracao:
+                pagamentos_asaas = []   # sem Asaas, o selo vira "não encontrado"; aviso aparece na aba Asaas
             cor = BRANDY["primary"]
             st.markdown(
                 f'<div style="background:{cor}15;border:2px solid {cor};'
@@ -191,7 +220,9 @@ with tab_guru:
             st.markdown("</div>", unsafe_allow_html=True)
             db_guru_seen.mark_seen([t["codigo"] for t in novos])
 
-        if not txs:
+        if _erro_guru is not None:
+            pass
+        elif not txs:
             st.info("Nenhuma transação no período.")
         else:
             df = pd.DataFrame(txs)
@@ -279,8 +310,13 @@ with tab_asaas:
     else:
         from asaas_api import AsaasClient
 
-        with st.spinner("Carregando dados do Asaas..."):
-            receber_raw, recebidos_raw, vencidas_raw, cust_map = _load_asaas(dt_ini_s, dt_fim_s)
+        try:
+            with st.spinner("Carregando dados do Asaas..."):
+                receber_raw, recebidos_raw, vencidas_raw, cust_map = _load_asaas(dt_ini_s, dt_fim_s)
+        except ErroIntegracao as _e:
+            st.error(f"❌ Não foi possível consultar o Asaas agora — os números não são exibidos para "
+                     f"não parecer que não houve cobranças. Motivo: {_e}")
+            st.stop()   # última aba da página: nada abaixo dela é afetado
 
         receber   = [AsaasClient.normaliza_pagamento(p, cust_map) for p in receber_raw]
         recebidos = [AsaasClient.normaliza_pagamento(p, cust_map) for p in recebidos_raw]

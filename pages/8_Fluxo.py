@@ -9,7 +9,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from utils import (GLOBAL_CSS, BRAND, brl, soma, kpi_card, plotly_layout,
+from utils import (mostrar_avisos_integracao, GLOBAL_CSS, BRAND, brl, soma, kpi_card, plotly_layout,
                    sidebar_header, get_empresas_disponiveis,
                    load_data_unificado, load_vencidas_unificado,
                    load_companies_data, load_companies_vencidas,
@@ -195,6 +195,8 @@ total_pag  = soma(pag_items,  "valor")
 total_vr   = soma(venc_rec,   "valor")
 total_vp   = soma(venc_pag,   "valor")
 saldo_liq  = total_rec - (total_pag if incluir_pagar else 0)
+
+mostrar_avisos_integracao(empresas_ativas)
 
 # ── Header ─────────────────────────────────────────────────────────────────────
 empresa_label = empresas_ativas[0] if len(empresas_ativas) == 1 else "Grupo GoGenetic"

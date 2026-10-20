@@ -2,7 +2,7 @@
 import time
 from datetime import date, timedelta
 
-import requests
+from http_seguro import ErroEsquema, exigir_lista, get_json
 
 API = "https://api.asaas.com/v3"
 
@@ -11,37 +11,32 @@ STATUS_PENDENTE = ("PENDING", "AWAITING_RISK_ANALYSIS")
 
 
 class AsaasClient:
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, _http_get=None, _dormir=time.sleep):
         self._key = api_key
+        self._http_get = _http_get
+        self._dormir = _dormir
 
     def _get(self, endpoint: str, params: dict = None) -> dict:
-        resp = requests.get(
-            f"{API}/{endpoint}",
-            headers={"access_token": self._key, "User-Agent": "GoGeneticDashboard",
-                      "Content-Type": "application/json"},
-            params=params,
-            timeout=20,
-        )
-        if resp.status_code == 429:
-            time.sleep(5)
-            return self._get(endpoint, params)
-        resp.raise_for_status()
-        return resp.json()
+        return get_json(f"{API}/{endpoint}",
+                        headers={"access_token": self._key, "User-Agent": "GoGeneticDashboard",
+                                 "Content-Type": "application/json", "Accept": "application/json"},
+                        params=params, provedor="Asaas", empresa="GoGenetic You",
+                        timeout=20, max_tentativas=3, http_get=self._http_get, dormir=self._dormir)
 
     def _pages(self, endpoint: str, params: dict = None) -> list:
         params = dict(params or {})
         result = []
         offset = 0
         limit = 100
-        while True:
+        for _ in range(2000):   # trava contra paginação infinita
             params.update({"offset": offset, "limit": limit})
             data = self._get(endpoint, params)
-            batch = data.get("data", [])
+            batch = exigir_lista(data, "data", provedor="Asaas", endpoint=endpoint)
             result.extend(batch)
             if not data.get("hasMore"):
-                break
+                return result
             offset += limit
-        return result
+        raise ErroEsquema(f"{endpoint}: paginação não terminou", provedor="Asaas")
 
     # ── Clientes (usado só pra montar o mapa id -> nome) ─────────────────────
     def get_customers_map(self) -> dict:

@@ -5,7 +5,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from datetime import date
 from calendar import monthrange
-from utils import (GLOBAL_CSS, BRAND, NOMES, CHART_COLORS, MESES_PT,
+from utils import (mostrar_avisos_integracao, GLOBAL_CSS, BRAND, NOMES, CHART_COLORS, MESES_PT,
                    brl, soma, kpi_card, plotly_layout, sidebar_header,
                    load_metas, get_empresas_disponiveis,
                    load_data_unificado, load_vendas_ano_unificado,
@@ -89,6 +89,8 @@ var_f = ((total_f / total_f_ant - 1) * 100) if total_f_ant else None
 pct_meta = (total_v / meta_mes * 100) if meta_mes else None
 
 ticket = total_v / len(vendas) if vendas else 0
+
+mostrar_avisos_integracao(empresas_ativas)
 
 # ── Header ─────────────────────────────────────────────────────────────────────
 empresa_label = empresas_ativas[0] if len(empresas_ativas) == 1 else "Grupo GoGenetic"

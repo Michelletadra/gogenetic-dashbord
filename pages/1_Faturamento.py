@@ -4,7 +4,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
 from datetime import date
-from utils import (GLOBAL_CSS, ASSETS, BRAND, NOMES, NOME_YOU, CHART_COLORS,
+from utils import (mostrar_avisos_integracao, GLOBAL_CSS, ASSETS, BRAND, NOMES, NOME_YOU, CHART_COLORS,
                    brl, soma, kpi_card, plotly_layout, sidebar_header,
                    get_clients, load_vendas_ano, load_metas, save_metas,
                    MESES_PT, get_empresas_disponiveis, load_vendas_ano_unificado,
@@ -88,6 +88,8 @@ fat_acum  = sum(fat_mes[m] for m in range(1, mes_corte + 1))
 meta_acum = sum(meta_mes[m] for m in range(1, mes_corte + 1))
 pct_acum  = (fat_acum / meta_acum * 100) if meta_acum else 0
 melhor_m  = max(fat_mes, key=fat_mes.get)
+
+_avisados = mostrar_avisos_integracao(empresas_ativas)
 
 # ── Header ─────────────────────────────────────────────────────────────────────
 empresa_label = empresa_sel if empresa_sel != "Todas" else "Grupo GoGenetic"
@@ -217,6 +219,8 @@ with st.spinner("Carregando histórico de anos anteriores..."):
                         fat_hist[a][m] += float(item.get("valorTotal") or 0)
                     except Exception:
                         pass
+
+mostrar_avisos_integracao(empresas_ativas, ja_mostradas=_avisados)
 
 # Remove anos sem nenhum dado
 anos_com_dados = [a for a in anos_comp if sum(fat_hist[a].values()) > 0]
