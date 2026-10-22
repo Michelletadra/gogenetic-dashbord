@@ -1,7 +1,7 @@
 """Página 8 — Fluxo de Caixa · Todas as Empresas."""
 import io
 import json
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import openpyxl
@@ -14,6 +14,7 @@ from utils import (mostrar_avisos_integracao, GLOBAL_CSS, BRAND, brl, soma, kpi_
                    load_data_unificado, load_vencidas_unificado,
                    load_companies_data, load_companies_vencidas,
                    tabela_marcavel)
+from fluxo_regras import parcelas_como_fluxo, projecao_semanal, pior_semana
 
 CONTRATOS_XLS  = Path(__file__).parent.parent / "data" / "contratos.xlsx"
 CONTRATOS_JSON = Path(__file__).parent.parent / "data" / "contratos_manual.json"
@@ -121,6 +122,17 @@ def load_parcelas_espera(caminho: str) -> list:
 
     return resultado
 
+@st.cache_data(ttl=300, show_spinner=False)
+def load_contratos_banco():
+    """Contratos e parcelas do banco do dashboard (mesma fonte da página
+    Contratos). Devolve (contratos, parcelas, erro)."""
+    try:
+        import db_contratos
+        return db_contratos.list_contratos(), db_contratos.list_parcelas(), None
+    except Exception as e:  # banco indisponível: avisa, não zera em silêncio
+        return [], [], f"{type(e).__name__}: {e}"
+
+
 st.set_page_config(page_title="Fluxo de Caixa | GoGenetic", page_icon="💰", layout="wide")
 st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
 
@@ -179,14 +191,26 @@ with st.spinner("Carregando fluxo de caixa..."):
         for it in v["receber"]: venc_rec.append({**it, "empresa": nome})
         for it in v["pagar"]:   venc_pag.append({**it, "empresa": nome})
 
-    # Parcelas de contratos EM ESPERA (não faturadas, fora do eGestor)
-    todas_parcelas = load_parcelas_espera(str(CONTRATOS_XLS))
-    dt_ini_str = dt_ini.strftime("%Y-%m-%d")
-    dt_fim_str = dt_fim.strftime("%Y-%m-%d")
-    parcelas_periodo = [
-        p for p in todas_parcelas
-        if dt_ini_str <= str(p.get("dtVenc", ""))[:10] <= dt_fim_str
-    ]
+    # Parcelas de contratos ainda não faturadas. Fonte: banco do dashboard
+    # (tabela contrato_parcelas, a mesma da página Contratos). A planilha
+    # data/contratos.xlsx só é usada se o banco não tiver parcelas.
+    _ctrs, _parc, _erro_ctr = load_contratos_banco()
+    _fluxo_ctr = parcelas_como_fluxo(_parc, _ctrs, dt_ini, dt_fim)
+    parcelas_sem_data   = _fluxo_ctr["sem_data"]
+    parcelas_nao_class  = _fluxo_ctr["nao_classificadas"]
+    fonte_contratos     = "banco (Contratos)"
+    if _parc:
+        parcelas_periodo = [p for p in _fluxo_ctr["no_periodo"]
+                            if empresa_sel == "Todas" or (p.get("_empresa_mapeada") and p.get("empresa") == empresa_sel)]
+    else:
+        fonte_contratos = "planilha contratos.xlsx"
+        todas_parcelas = load_parcelas_espera(str(CONTRATOS_XLS))
+        dt_ini_str = dt_ini.strftime("%Y-%m-%d")
+        dt_fim_str = dt_fim.strftime("%Y-%m-%d")
+        parcelas_periodo = [
+            p for p in todas_parcelas
+            if dt_ini_str <= str(p.get("dtVenc", ""))[:10] <= dt_fim_str
+        ]
     rec_items += parcelas_periodo
     total_contratos = soma(parcelas_periodo, "valor")
 
@@ -197,6 +221,9 @@ total_vp   = soma(venc_pag,   "valor")
 saldo_liq  = total_rec - (total_pag if incluir_pagar else 0)
 
 mostrar_avisos_integracao(empresas_ativas)
+if _erro_ctr:
+    st.warning(f"⚠️ Não foi possível ler os contratos agora — o cartão Contratos pode "
+               f"aparecer zerado, o que NÃO significa ausência de parcelas. Motivo: {_erro_ctr}")
 
 # ── Header ─────────────────────────────────────────────────────────────────────
 empresa_label = empresas_ativas[0] if len(empresas_ativas) == 1 else "Grupo GoGenetic"
@@ -208,7 +235,7 @@ st.markdown(f"""
 # ── KPIs ───────────────────────────────────────────────────────────────────────
 c1, c2, c3, c4, c5, c6 = st.columns(6)
 kpi_card(c1, "📥", "A Receber",      brl(total_rec - total_contratos), f"{len(rec_items) - len(parcelas_periodo)} títulos", border="#10B981")
-kpi_card(c2, "📋", "Contratos",      brl(total_contratos), f"{len(parcelas_periodo)} parcelas em espera", border="#7E16B8")
+kpi_card(c2, "📋", "Contratos",      brl(total_contratos), f"{len(parcelas_periodo)} parcelas a faturar", border="#7E16B8")
 kpi_card(c3, "⚠️", "Vencido a Rec.", brl(total_vr),  f"{len(venc_rec)} títulos",  border="#F59E0B",
          value_class="kpi-warn" if total_vr > 0 else "")
 kpi_card(c4, "📤", "A Pagar",        brl(total_pag), f"{len(pag_items)} títulos", border="#EF4444")
@@ -217,6 +244,62 @@ kpi_card(c5, "🚨", "Vencido a Pag.", brl(total_vp),  f"{len(venc_pag)} título
 kpi_card(c6, "💼", "Saldo Líquido",  brl(saldo_liq), f"receber+contratos − {'pagar' if incluir_pagar else 'zero'}",
          border="#7E16B8" if saldo_liq >= 0 else "#EF4444",
          value_class="kpi-positive" if saldo_liq >= 0 else "kpi-negative")
+
+# ── Projeção 13 semanas (Fase 2) ───────────────────────────────────────────────
+st.markdown("<div class='section-title'>Projeção — próximas 13 semanas</div>", unsafe_allow_html=True)
+st.caption(
+    "Entradas = contas a receber do ERP + parcelas de contrato ainda não faturadas; "
+    "saídas = contas a pagar. **Sem saldo bancário inicial** (os bancos ainda não estão "
+    "integrados): a linha acumulada mostra a posição líquida a partir de zero, não o caixa. "
+    "Vencidos não entram na projeção — estão na aba ⚠️ Vencidos. "
+    f"Parcelas de contrato: fonte {fonte_contratos}."
+)
+_hoje = date.today()
+_dt_13 = _hoje + timedelta(weeks=13)
+if dt_fim < _dt_13:
+    # garante 13 semanas mesmo com horizonte menor na barra lateral
+    _map13 = load_companies_data(empresas_ativas, _hoje.strftime("%Y-%m-%d"), _dt_13.strftime("%Y-%m-%d"))
+    _rec13 = [it for n in empresas_ativas for it in _map13[n]["contas_receber"]]
+    _pag13 = [it for n in empresas_ativas for it in _map13[n]["contas_pagar"]]
+else:
+    _rec13 = [it for it in rec_items if it.get("_origem") != "contrato"]
+    _pag13 = pag_items
+if _parc:
+    _ctr13 = [p for p in parcelas_como_fluxo(_parc, _ctrs, _hoje, _dt_13)["no_periodo"]
+              if empresa_sel == "Todas" or (p.get("_empresa_mapeada") and p.get("empresa") == empresa_sel)]
+else:
+    _ctr13 = [p for p in parcelas_periodo]
+_proj = projecao_semanal(_rec13, _ctr13, _pag13 if incluir_pagar else [], _hoje, 13)
+_df_proj = pd.DataFrame(_proj)
+_pior = pior_semana(_proj)
+p1, p2, p3, p4 = st.columns(4)
+kpi_card(p1, "📥", "Entradas 13 sem.", brl(_df_proj["entradas"].sum()), "receber + contratos", border="#10B981")
+kpi_card(p2, "📤", "Saídas 13 sem.", brl(_df_proj["pagar"].sum()),
+         "a pagar" if incluir_pagar else "desligado na barra lateral", border="#EF4444")
+kpi_card(p3, "📊", "Posição em 13 sem.", brl(_df_proj["acumulado"].iloc[-1]), "líquido acumulado, sem saldo inicial",
+         border="#7E16B8", value_class="kpi-positive" if _df_proj["acumulado"].iloc[-1] >= 0 else "kpi-negative")
+kpi_card(p4, "🔻", "Pior semana", brl(_pior["acumulado"]) if _pior else "—",
+         f"semana de {_pior['semana']:%d/%m}" if _pior else "", border="#F59E0B",
+         value_class="kpi-negative" if _pior and _pior["acumulado"] < 0 else "")
+if not _df_proj.empty:
+    _df_g = _df_proj.copy()
+    _df_g["Semana"] = _df_g["semana"].apply(lambda d: d.strftime("%d/%m"))
+    _fig_p = px.bar(_df_g, x="Semana", y=["receber", "contratos"], barmode="stack",
+                    labels={"value": "R$", "variable": ""},
+                    color_discrete_map={"receber": "#10B981", "contratos": "#7E16B8"})
+    _fig_p.add_bar(x=_df_g["Semana"], y=-_df_g["pagar"], name="pagar", marker_color="#EF4444")
+    _fig_p.add_scatter(x=_df_g["Semana"], y=_df_g["acumulado"], name="acumulado", mode="lines+markers",
+                       line=dict(color="#1A1033", width=2))
+    _fig_p.update_layout(barmode="relative")
+    plotly_layout(_fig_p)
+    st.plotly_chart(_fig_p, use_container_width=True)
+    with st.expander("Ver tabela semanal"):
+        _t = _df_g[["Semana", "receber", "contratos", "pagar", "liquido", "acumulado"]].rename(columns={
+            "receber": "A receber (ERP)", "contratos": "Contratos a faturar", "pagar": "A pagar",
+            "liquido": "Líquido da semana", "acumulado": "Acumulado"})
+        for col in _t.columns[1:]:
+            _t[col] = _t[col].apply(brl)
+        st.dataframe(_t, hide_index=True, use_container_width=True)
 
 # ── Prepara DataFrame ──────────────────────────────────────────────────────────
 def prep_items(items: list, tipo: str) -> pd.DataFrame:
@@ -255,7 +338,7 @@ n_egst  = len(rec_items) - len(parcelas_periodo)
 n_contr = len(parcelas_periodo)
 tab_rec_t, tab_contr_t, tab_pag_t, tab_venc_t = st.tabs([
     f"📥 A Receber eGestor ({n_egst})",
-    f"📋 Contratos em Espera ({n_contr})",
+    f"📋 Contratos a Faturar ({n_contr})",
     f"📤 A Pagar ({len(pag_items)})",
     f"⚠️ Vencidos ({len(venc_rec) + len(venc_pag)})",
 ])
@@ -328,7 +411,18 @@ with tab_contr_t:
                       "nomeContato": "Contratante", "valor": "Valor", "descricao": "Descrição"}
         tabela_fluxo(parcelas_periodo, COLS_CONTR, "contratos")
     else:
-        st.info("Nenhuma parcela de contrato em espera para o período selecionado.")
+        st.info("Nenhuma parcela de contrato a faturar no período selecionado.")
+    if parcelas_sem_data or parcelas_nao_class:
+        with st.expander(f"Fora da projeção: {len(parcelas_sem_data)} sem data · "
+                         f"{len(parcelas_nao_class)} com situação não reconhecida"):
+            st.caption("Estas parcelas não entram em nenhum total até o cadastro ser revisado em Contratos.")
+            COLS_X = {"empresa": "Empresa", "nomeContato": "Contratante", "valor": "Valor",
+                      "situacao": "Situação", "descricao": "Descrição"}
+            _dx = pd.DataFrame(parcelas_sem_data + parcelas_nao_class)
+            _dx = _dx[[c for c in COLS_X if c in _dx.columns]].rename(columns=COLS_X)
+            if "Valor" in _dx.columns:
+                _dx["Valor"] = _dx["Valor"].apply(brl)
+            st.dataframe(_dx, hide_index=True, use_container_width=True)
 
 with tab_pag_t:
     tabela_fluxo(pag_items, COLS_PAG, "pagar")
