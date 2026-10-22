@@ -4,7 +4,8 @@ from datetime import date
 from utils import (GLOBAL_CSS, ASSETS, BRAND, NOMES, TODOS_NOMES, NOME_YOU,
                    CHART_COLORS, brl, soma, kpi_card, plotly_layout,
                    get_clients, load_company_data, load_bling_data,
-                   sidebar_header, get_authenticator, get_bling_connection_error)
+                   sidebar_header, get_authenticator, get_bling_connection_error,
+                   mostrar_avisos_integracao, empresa_com_falha)
 import bling_auth
 
 st.set_page_config(
@@ -109,6 +110,7 @@ if _bling_ok:
 _placeholder.empty()
 
 empresas_visiveis = NOMES + ([NOME_YOU] if _bling_ok else [])
+mostrar_avisos_integracao(empresas_visiveis)
 
 # ── KPIs por empresa ──────────────────────────────────────────────────────────
 st.markdown("<div class='section-title'>Performance do Mês — por Empresa</div>", unsafe_allow_html=True)
@@ -126,10 +128,13 @@ for nome in empresas_visiveis:
     total_r = soma(rec,    "valor")
     total_p = soma(pag,    "valor")
 
+    _selo_falha = ("<span style='font-size:.75rem;font-weight:700;color:#B45309;background:#FEF3C7;"
+                   "border-radius:10px;padding:2px 10px'>⚠️ consulta falhou — ver aviso acima</span>"
+                   if empresa_com_falha(nome) else "")
     st.markdown(f"""
     <div style="display:flex;align-items:center;gap:12px;margin:16px 0 8px 0;">
       <div style="width:6px;height:32px;background:{brand['primary']};border-radius:3px;"></div>
-      <span style="font-size:1rem;font-weight:700;color:#1A0A2E">{nome}</span>
+      <span style="font-size:1rem;font-weight:700;color:#1A0A2E">{nome}</span>{_selo_falha}
     </div>
     """, unsafe_allow_html=True)
 

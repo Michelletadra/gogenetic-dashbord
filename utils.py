@@ -501,6 +501,103 @@ def _periodo_fechado(dt_fim: str) -> bool:
     return dt_fim < f"{date.today().year}-01-01"
 
 
+# ── Estado das integrações (Fase 1, 20/10/2026) ───────────────────────────────
+# Regra: falha de API NUNCA vira lista vazia que pareça verdadeira. As funções
+# cacheadas abaixo (prefixo _cache_) levantam exceção quando a consulta falha —
+# o st.cache_data não guarda exceções, então a falha não fica "presa" por 15 min.
+# As funções públicas (mesmos nomes e mesmo formato de retorno de antes) chamam
+# a cacheada via _executar(): em caso de falha registram o erro aqui, devolvem a
+# última resposta válida (se houver) ou vazio, e a página mostra o aviso com
+# mostrar_avisos_integracao(). No sucesso, o resultado é idêntico ao anterior.
+
+import copy as _copy
+import threading as _threading
+import time as _time
+import logging as _logging
+from datetime import datetime as _datetime
+
+_log_int = _logging.getLogger("integracoes")
+ESPERA_APOS_FALHA = 30   # s — evita martelar uma API fora do ar a cada rerun
+
+
+@st.cache_resource
+def _estado_integracoes() -> dict:
+    return {"lock": _threading.Lock(), "status": {}, "ultimo_ok": {}}
+
+
+def _executar(empresa: str, chave: str, fn, vazio):
+    est = _estado_integracoes()
+    k = (empresa, chave)
+    with est["lock"]:
+        st_ant = est["status"].get(k)
+        ultimo = est["ultimo_ok"].get(k)
+    if st_ant and st_ant.get("erro") and _time.time() - st_ant["quando"] < ESPERA_APOS_FALHA:
+        return _copy.deepcopy(ultimo["dados"] if ultimo else vazio)
+    try:
+        dados = fn()
+    except Exception as exc:  # noqa: BLE001 — qualquer falha vira status visível
+        msg = str(exc) or type(exc).__name__
+        _log_int.error("carga_falhou empresa=%s chave=%s tipo=%s", empresa, chave, type(exc).__name__)
+        with est["lock"]:
+            est["status"][k] = {"erro": msg, "quando": _time.time(),
+                                "ultimo_ok_em": ultimo["em"] if ultimo else None}
+        return _copy.deepcopy(ultimo["dados"] if ultimo else vazio)
+    agora = _datetime.now()
+    with est["lock"]:
+        est["status"][k] = {"erro": None, "quando": _time.time(), "ultimo_ok_em": agora}
+        est["ultimo_ok"][k] = {"dados": _copy.deepcopy(dados), "em": agora}
+    return dados
+
+
+def falhas_integracao(empresas: Optional[list] = None) -> list:
+    """Falhas registradas nos últimos 15 min: [{empresa, chave, erro, ultimo_ok_em}]."""
+    est = _estado_integracoes()
+    limite = _time.time() - 900
+    with est["lock"]:
+        itens = [(k, v) for k, v in est["status"].items()]
+    out = []
+    for (emp, chave), v in itens:
+        if v.get("erro") and v["quando"] >= limite and (empresas is None or emp in empresas):
+            out.append({"empresa": emp, "chave": chave, "erro": v["erro"],
+                        "ultimo_ok_em": v.get("ultimo_ok_em")})
+    return out
+
+
+def ultima_atualizacao(empresa: str, chave: str):
+    """datetime da última consulta bem-sucedida (neste servidor) ou None."""
+    est = _estado_integracoes()
+    with est["lock"]:
+        v = est["ultimo_ok"].get((empresa, chave))
+    return v["em"] if v else None
+
+
+def empresa_com_falha(empresa: str) -> bool:
+    return any(f["empresa"] == empresa for f in falhas_integracao([empresa]))
+
+
+def mostrar_avisos_integracao(empresas: Optional[list] = None, ja_mostradas: Optional[set] = None) -> set:
+    """Mostra na página (thread principal) as consultas que falharam. Chamar
+    depois de carregar os dados. Devolve o conjunto de empresas avisadas, que
+    pode ser passado de novo em `ja_mostradas` para não repetir o aviso."""
+    ja_mostradas = set(ja_mostradas or ())
+    falhas = falhas_integracao(empresas)
+    por_emp = {}
+    for f in falhas:
+        por_emp.setdefault(f["empresa"], []).append(f)
+    for emp, fs in por_emp.items():
+        if emp in ja_mostradas:
+            continue
+        ja_mostradas.add(emp)
+        ult = max((f["ultimo_ok_em"] for f in fs if f["ultimo_ok_em"]), default=None)
+        base = (f"Mostrando a última consulta válida, de {ult.strftime('%d/%m %H:%M')}."
+                if ult else "Os valores desta empresa podem aparecer zerados — "
+                            "isso NÃO significa ausência de registros.")
+        detalhe = fs[0]["erro"]
+        st.warning(f"⚠️ **{emp}: não foi possível consultar os dados agora.** {base}\n\n"
+                   f"Motivo: {detalhe}", icon=None)
+    return ja_mostradas
+
+
 # ── API clients ────────────────────────────────────────────────────────────────
 
 @st.cache_resource
@@ -514,14 +611,17 @@ def get_clients() -> dict:
     return {e["nome"]: EgestorClient(e["token"], e["nome"]) for e in empresas}
 
 
+_VAZIO_PERIODO = {"vendas": [], "faturamento": [], "contas_receber": [], "contas_pagar": []}
+
+
 @st.cache_data(ttl=900, show_spinner=False)
-def load_company_data(nome: str, dt_ini: str, dt_fim: str) -> dict:
+def _cache_company_data(nome: str, dt_ini: str, dt_fim: str) -> dict:
     """Carrega os 4 endpoints em paralelo para reduzir latência.
 
     Período inteiramente dentro de um ano já fechado: primeiro tenta o
     arquivo permanente (ver "Arquivamento de dados históricos" acima); só
     bate na API do eGestor se ainda não tiver sido arquivado, e nesse caso
-    arquiva o resultado em seguida."""
+    arquiva o resultado em seguida. Falha levanta exceção (não é cacheada)."""
     import db_dados_arquivados
     fechado = _periodo_fechado(dt_fim)
     chave = f"periodo:{dt_ini}:{dt_fim}"
@@ -532,43 +632,43 @@ def load_company_data(nome: str, dt_ini: str, dt_fim: str) -> dict:
 
     from concurrent.futures import ThreadPoolExecutor
     client = get_clients()[nome]
-    _empty = {"vendas": [], "faturamento": [], "contas_receber": [], "contas_pagar": []}
-    try:
-        with ThreadPoolExecutor(max_workers=4) as ex:
-            fv = ex.submit(client.get_vendas,         dt_ini, dt_fim)
-            ff = ex.submit(client.get_faturamento,     dt_ini, dt_fim)
-            fr = ex.submit(client.get_contas_receber,  dt_ini, dt_fim)
-            fp = ex.submit(client.get_contas_pagar,    dt_ini, dt_fim)
-        resultado = {
-            "vendas":         fv.result(),
-            "faturamento":    ff.result(),
-            "contas_receber": fr.result(),
-            "contas_pagar":   fp.result(),
-        }
-    except Exception as exc:
-        st.error(f"Erro ao carregar {nome}: {exc}")
-        return _empty
-
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        fv = ex.submit(client.get_vendas,         dt_ini, dt_fim)
+        ff = ex.submit(client.get_faturamento,     dt_ini, dt_fim)
+        fr = ex.submit(client.get_contas_receber,  dt_ini, dt_fim)
+        fp = ex.submit(client.get_contas_pagar,    dt_ini, dt_fim)
+    resultado = {
+        "vendas":         fv.result(),
+        "faturamento":    ff.result(),
+        "contas_receber": fr.result(),
+        "contas_pagar":   fp.result(),
+    }
     if fechado and any(resultado.values()):
         db_dados_arquivados.salvar_arquivado(nome, chave, resultado)
     return resultado
 
 
+def load_company_data(nome: str, dt_ini: str, dt_fim: str) -> dict:
+    return _executar(nome, f"periodo:{dt_ini}:{dt_fim}",
+                     lambda: _cache_company_data(nome, dt_ini, dt_fim), dict(_VAZIO_PERIODO))
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
-def load_vencidas(nome: str) -> dict:
+def _cache_vencidas(nome: str) -> dict:
     from concurrent.futures import ThreadPoolExecutor
     client = get_clients()[nome]
-    try:
-        with ThreadPoolExecutor(max_workers=2) as ex:
-            fr = ex.submit(client.get_vencidas_receber)
-            fp = ex.submit(client.get_vencidas_pagar)
-        return {"receber": fr.result(), "pagar": fp.result()}
-    except Exception:
-        return {"receber": [], "pagar": []}
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        fr = ex.submit(client.get_vencidas_receber)
+        fp = ex.submit(client.get_vencidas_pagar)
+    return {"receber": fr.result(), "pagar": fp.result()}
+
+
+def load_vencidas(nome: str) -> dict:
+    return _executar(nome, "vencidas", lambda: _cache_vencidas(nome), {"receber": [], "pagar": []})
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def load_vendas_ano(nome: str, ano: int) -> list:
+def _cache_vendas_ano(nome: str, ano: int) -> list:
     """Vendas do ano inteiro. Ano já fechado (anterior ao corrente): arquivado
     pra sempre na primeira busca (ver "Arquivamento de dados históricos" acima)."""
     import db_dados_arquivados
@@ -580,14 +680,15 @@ def load_vendas_ano(nome: str, ano: int) -> list:
             return arquivado
 
     client = get_clients()[nome]
-    try:
-        vendas = client.get_vendas(f"{ano}-01-01", f"{ano}-12-31")
-    except Exception:
-        vendas = []
+    vendas = client.get_vendas(f"{ano}-01-01", f"{ano}-12-31")
 
     if fechado and vendas:
         db_dados_arquivados.salvar_arquivado(nome, chave, vendas)
     return vendas
+
+
+def load_vendas_ano(nome: str, ano: int) -> list:
+    return _executar(nome, f"vendas_ano:{ano}", lambda: _cache_vendas_ano(nome, ano), [])
 
 
 # ── Bling (GoGenetic You) ──────────────────────────────────────────────────────
@@ -604,7 +705,8 @@ def get_bling_client():
     O client fica cacheado em `_bling_client_holder()`, mas o access_token pode
     expirar e ser renovado (via bling_auth.get_token()) entre uma chamada e
     outra — por isso o token é resincronizado na instância cacheada a cada
-    chamada, em vez de ficar preso no valor usado na criação.
+    chamada, em vez de ficar preso no valor usado na criação. Em 401 o
+    cliente tenta UMA renovação via bling_auth.renovar_agora().
     """
     holder = _bling_client_holder()
     try:
@@ -614,7 +716,8 @@ def get_bling_client():
         if not token:
             return None
         if holder["client"] is None:
-            holder["client"] = bling_api.BlingClient(token, NOME_YOU)
+            holder["client"] = bling_api.BlingClient(token, NOME_YOU,
+                                                     renovar_token=bling_auth.renovar_agora)
         else:
             holder["client"]._token = token
         return holder["client"]
@@ -623,13 +726,22 @@ def get_bling_client():
     return None
 
 
+def _bling_client_ou_erro():
+    client = get_bling_client()
+    if not client:
+        from http_seguro import ErroAutenticacao
+        raise ErroAutenticacao("Bling não conectado ou token não pôde ser renovado — reconecte",
+                               provedor="Bling", empresa=NOME_YOU)
+    return client
+
+
 def reset_bling_client():
     """Força recriação do BlingClient (após novo OAuth)."""
     _bling_client_holder()["client"] = None
 
 
 @st.cache_data(ttl=900, show_spinner=False)
-def load_bling_data(dt_ini: str, dt_fim: str) -> dict:
+def _cache_bling_data(dt_ini: str, dt_fim: str) -> dict:
     """Período inteiramente dentro de um ano já fechado: mesmo arquivamento
     permanente usado em load_company_data (ver comentário lá)."""
     import db_dados_arquivados
@@ -641,42 +753,39 @@ def load_bling_data(dt_ini: str, dt_fim: str) -> dict:
             return arquivado
 
     from concurrent.futures import ThreadPoolExecutor
-    client = get_bling_client()
-    _empty = {"vendas": [], "faturamento": [], "contas_receber": [], "contas_pagar": []}
-    if not client:
-        return _empty
-    try:
-        from bling_api import BlingClient
-        with ThreadPoolExecutor(max_workers=4) as ex:
-            fv = ex.submit(client.get_vendas,         dt_ini, dt_fim)
-            ff = ex.submit(client.get_faturamento,     dt_ini, dt_fim)
-            fr = ex.submit(client.get_contas_receber,  dt_ini, dt_fim)
-            fp = ex.submit(client.get_contas_pagar,    dt_ini, dt_fim)
-        vendas_raw, fat_raw, rec_raw, pag_raw = fv.result(), ff.result(), fr.result(), fp.result()
+    from bling_api import BlingClient
+    client = _bling_client_ou_erro()
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        fv = ex.submit(client.get_vendas,         dt_ini, dt_fim)
+        ff = ex.submit(client.get_faturamento,     dt_ini, dt_fim)
+        fr = ex.submit(client.get_contas_receber,  dt_ini, dt_fim)
+        fp = ex.submit(client.get_contas_pagar,    dt_ini, dt_fim)
+    vendas_raw, fat_raw, rec_raw, pag_raw = fv.result(), ff.result(), fr.result(), fp.result()
 
-        def _dentro(item: dict) -> bool:
-            venc = item.get("vencimento") or item.get("dataVencimento") or ""
-            if not venc:
-                return True
-            return dt_ini <= str(venc)[:10] <= dt_fim
+    def _dentro(item: dict) -> bool:
+        venc = item.get("vencimento") or item.get("dataVencimento") or ""
+        if not venc:
+            return True
+        return dt_ini <= str(venc)[:10] <= dt_fim
 
-        resultado = {
-            "vendas":         [BlingClient.normaliza_venda(v) for v in vendas_raw],
-            "faturamento":    [BlingClient.normaliza_conta(v) for v in fat_raw],
-            "contas_receber": [BlingClient.normaliza_conta(v) for v in rec_raw if _dentro(v)],
-            "contas_pagar":   [BlingClient.normaliza_conta(v) for v in pag_raw if _dentro(v)],
-        }
-    except Exception as exc:
-        st.error(f"Erro Bling: {exc}")
-        return _empty
-
+    resultado = {
+        "vendas":         [BlingClient.normaliza_venda(v) for v in vendas_raw],
+        "faturamento":    [BlingClient.normaliza_conta(v) for v in fat_raw],
+        "contas_receber": [BlingClient.normaliza_conta(v) for v in rec_raw if _dentro(v)],
+        "contas_pagar":   [BlingClient.normaliza_conta(v) for v in pag_raw if _dentro(v)],
+    }
     if fechado and any(resultado.values()):
         db_dados_arquivados.salvar_arquivado(NOME_YOU, chave, resultado)
     return resultado
 
 
+def load_bling_data(dt_ini: str, dt_fim: str) -> dict:
+    return _executar(NOME_YOU, f"periodo:{dt_ini}:{dt_fim}",
+                     lambda: _cache_bling_data(dt_ini, dt_fim), dict(_VAZIO_PERIODO))
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
-def load_bling_vendas_ano(ano: int) -> list:
+def _cache_bling_vendas_ano(ano: int) -> list:
     """Mesmo arquivamento permanente de load_vendas_ano (ver comentário lá),
     pro ano já fechado."""
     import db_dados_arquivados
@@ -687,33 +796,31 @@ def load_bling_vendas_ano(ano: int) -> list:
         if arquivado is not None:
             return arquivado
 
-    client = get_bling_client()
-    if not client:
-        return []
-    try:
-        from bling_api import BlingClient
-        vendas = [BlingClient.normaliza_venda(v) for v in client.get_vendas_ano(ano)]
-    except Exception:
-        vendas = []
+    from bling_api import BlingClient
+    client = _bling_client_ou_erro()
+    vendas = [BlingClient.normaliza_venda(v) for v in client.get_vendas_ano(ano)]
 
     if fechado and vendas:
         db_dados_arquivados.salvar_arquivado(NOME_YOU, chave, vendas)
     return vendas
 
 
+def load_bling_vendas_ano(ano: int) -> list:
+    return _executar(NOME_YOU, f"vendas_ano:{ano}", lambda: _cache_bling_vendas_ano(ano), [])
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
+def _cache_bling_vencidas() -> dict:
+    from bling_api import BlingClient
+    client = _bling_client_ou_erro()
+    return {
+        "receber": [BlingClient.normaliza_conta(v) for v in client.get_vencidas_receber()],
+        "pagar":   [BlingClient.normaliza_conta(v) for v in client.get_vencidas_pagar()],
+    }
+
+
 def load_bling_vencidas() -> dict:
-    client = get_bling_client()
-    if not client:
-        return {"receber": [], "pagar": []}
-    try:
-        from bling_api import BlingClient
-        return {
-            "receber": [BlingClient.normaliza_conta(v) for v in client.get_vencidas_receber()],
-            "pagar":   [BlingClient.normaliza_conta(v) for v in client.get_vencidas_pagar()],
-        }
-    except Exception:
-        return {"receber": [], "pagar": []}
+    return _executar(NOME_YOU, "vencidas", _cache_bling_vencidas, {"receber": [], "pagar": []})
 
 
 # ── Helpers unificados (eGestor + Bling) ──────────────────────────────────────
@@ -773,38 +880,37 @@ def load_vencidas_unificado(nome: str) -> dict:
 # ── Realizado (despesas pagas) ────────────────────────────────────────────────
 
 @st.cache_data(ttl=900, show_spinner=False)
+def _cache_pagamentos_realizados(nome: str, dt_ini: str, dt_fim: str) -> list:
+    """Pagamentos efetivamente pagos (situFin=30) de uma empresa eGestor."""
+    return get_clients()[nome].get_pagamentos_realizados(dt_ini, dt_fim)
+
+
 def load_pagamentos_realizados(nome: str, dt_ini: str, dt_fim: str) -> list:
-    """Carrega pagamentos efetivamente pagos (situFin=30) de uma empresa eGestor."""
-    client = get_clients().get(nome)
-    if not client:
+    if nome not in get_clients():
         return []
-    try:
-        return client.get_pagamentos_realizados(dt_ini, dt_fim)
-    except Exception as exc:
-        st.error(f"Erro ao carregar realizados de {nome}: {exc}")
-        return []
+    return _executar(nome, f"realizados:{dt_ini}:{dt_fim}",
+                     lambda: _cache_pagamentos_realizados(nome, dt_ini, dt_fim), [])
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
+def _cache_realizados_12m(nome: str, dt_ini: str, dt_fim: str) -> list:
+    return get_clients()[nome].get_pagamentos_realizados(dt_ini, dt_fim)
+
+
 def load_realizados_12m(nome: str) -> list:
     """Carrega realizados dos últimos 12 meses (cache 1h)."""
-    from datetime import date
+    if nome not in get_clients():
+        return []
     dt_fim = date.today()
     dt_ini = dt_fim.replace(year=dt_fim.year - 1)
-    client = get_clients().get(nome)
-    if not client:
-        return []
-    try:
-        return client.get_pagamentos_realizados(
-            dt_ini.strftime("%Y-%m-%d"), dt_fim.strftime("%Y-%m-%d")
-        )
-    except Exception:
-        return []
+    a, b = dt_ini.strftime("%Y-%m-%d"), dt_fim.strftime("%Y-%m-%d")
+    return _executar(nome, "realizados_12m", lambda: _cache_realizados_12m(nome, a, b), [])
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def load_bling_categorias() -> dict:
-    """Carrega categorias do Bling e retorna mapa id → {grupo, subgrupo} (cache 1h)."""
+    """Carrega categorias do Bling e retorna mapa id → {grupo, subgrupo} (cache 1h).
+    Categorias são só rótulos: se falhar, segue sem elas (registrado em log)."""
     client = get_bling_client()
     if not client:
         return {}
@@ -812,51 +918,46 @@ def load_bling_categorias() -> dict:
         from bling_api import BlingClient
         cats = client.get_categorias()
         return BlingClient.build_cat_map(cats)
-    except Exception:
+    except Exception as exc:
+        _log_int.warning("bling_categorias_falhou tipo=%s", type(exc).__name__)
         return {}
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
+def _cache_bling_pagamentos_realizados(dt_ini: str, dt_fim: str) -> list:
+    from bling_api import BlingClient
+    client = _bling_client_ou_erro()
+    raw     = client.get_pagamentos_realizados(dt_ini, dt_fim)
+    cat_map = load_bling_categorias()
+    return [BlingClient.normaliza_pagamento_realizado(r, cat_map) for r in raw]
+
+
 def load_bling_pagamentos_realizados(dt_ini: str, dt_fim: str) -> list:
     """Contas a pagar pagas do Bling (cache 1h). Usa apenas a lista — sem chamadas
     individuais por pagamento. Categoria vem do campo 'historico' da lista.
     """
-    client = get_bling_client()
-    if not client:
-        return []
-    try:
-        from bling_api import BlingClient
-        raw     = client.get_pagamentos_realizados(dt_ini, dt_fim)
-        cat_map = load_bling_categorias()
-        return [BlingClient.normaliza_pagamento_realizado(r, cat_map) for r in raw]
-    except Exception as exc:
-        import streamlit as _st
-        _st.error(f"Erro Bling realizados: {exc}")
-        return []
+    return _executar(NOME_YOU, f"realizados:{dt_ini}:{dt_fim}",
+                     lambda: _cache_bling_pagamentos_realizados(dt_ini, dt_fim), [])
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
+def _cache_bling_realizados_12m(dt_ini: str, dt_fim: str) -> list:
+    from bling_api import BlingClient
+    client = _bling_client_ou_erro()
+    raw = client.get_pagamentos_realizados(dt_ini, dt_fim)
+    # Normaliza sem buscar detalhe individual (1099 chamadas = ~6 min → inviável)
+    return [BlingClient.normaliza_pagamento_realizado(r) for r in raw]
+
+
 def load_bling_realizados_12m() -> list:
     """Realizados Bling dos últimos 12 meses — versão rápida SEM detalhes.
-    Busca apenas a lista (1 chamada por página) sem ir em cada conta individualmente.
     Categorias aparecem como 'Sem Categoria'; use load_bling_pagamentos_realizados
     para um período específico quando precisar das categorias detalhadas.
     """
-    from datetime import date
-    from bling_api import BlingClient
-    client = get_bling_client()
-    if not client:
-        return []
-    try:
-        dt_fim = date.today()
-        dt_ini = dt_fim.replace(year=dt_fim.year - 1)
-        raw = client.get_pagamentos_realizados(
-            dt_ini.strftime("%Y-%m-%d"), dt_fim.strftime("%Y-%m-%d")
-        )
-        # Normaliza sem buscar detalhe individual (1099 chamadas = ~6 min → inviável)
-        return [BlingClient.normaliza_pagamento_realizado(r) for r in raw]
-    except Exception:
-        return []
+    dt_fim = date.today()
+    dt_ini = dt_fim.replace(year=dt_fim.year - 1)
+    a, b = dt_ini.strftime("%Y-%m-%d"), dt_fim.strftime("%Y-%m-%d")
+    return _executar(NOME_YOU, "realizados_12m", lambda: _cache_bling_realizados_12m(a, b), [])
 
 
 @st.cache_data(ttl=3600, show_spinner=False)

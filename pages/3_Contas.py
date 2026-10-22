@@ -5,7 +5,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from datetime import date, timedelta
-from utils import (GLOBAL_CSS, BRAND, NOMES, NOME_YOU, CHART_COLORS,
+from utils import (mostrar_avisos_integracao, GLOBAL_CSS, BRAND, NOMES, NOME_YOU, CHART_COLORS,
                    brl, soma, kpi_card, plotly_layout, sidebar_header,
                    load_company_data, load_vencidas,
                    get_empresas_disponiveis, load_data_unificado,
@@ -120,6 +120,8 @@ total_pag = soma(contas_pag, "valor")
 saldo     = total_rec - total_pag
 total_vr  = soma(venc_rec, "valor")
 total_vp  = soma(venc_pag, "valor")
+
+mostrar_avisos_integracao(empresas_ativas)
 
 # ── Header ─────────────────────────────────────────────────────────────────────
 empresa_label = empresas_ativas[0] if len(empresas_ativas) == 1 else "Grupo GoGenetic"
