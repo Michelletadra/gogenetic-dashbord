@@ -85,8 +85,64 @@ def dias_ate(data_termino):
     except: return None
 
 # ══════════════════════════════════════════════════════════════════════════════
-tabs = st.tabs(["📊 Painel","📋 Contratos","🔍 Detalhes","➕ Novo","📎 Aditivos"])
-tab_painel, tab_lista, tab_detalhe, tab_novo, tab_aditivos = tabs
+tabs = st.tabs(["📊 Painel","📋 Contratos","📈 Execução","🔍 Detalhes","➕ Novo","📎 Aditivos"])
+tab_painel, tab_lista, tab_execucao, tab_detalhe, tab_novo, tab_aditivos = tabs
+
+# ══════════════════════════════════════════════════════════════════════════════
+# EXECUÇÃO (Fase 2 — só leitura, a partir de contratos + parcelas já cadastrados)
+# ══════════════════════════════════════════════════════════════════════════════
+with tab_execucao:
+    from fluxo_regras import execucao_contratos
+    _ex_ctrs = list_contratos()
+    _ex = execucao_contratos(_ex_ctrs, list_parcelas())
+    for _e in _ex:
+        _e["empresa"] = _EMPRESA_LABEL.get(_e["empresa"], _e["empresa"])
+    st.caption(
+        "**Contratado** = valor total do contrato · **Faturado** = parcelas com NF ou situação de "
+        "faturada/paga · **A faturar** = parcelas pendentes com valor · **Saldo** = contratado − "
+        "faturado. Fonte: cadastro de contratos e parcelas "
+        "(nada é recalculado nem gravado). Ainda não há vínculo contrato ↔ OS/recebimento no "
+        "cadastro, por isso *executado* e *recebido* não aparecem aqui."
+    )
+    _f1, _f2, _f3 = st.columns([2, 2, 2])
+    _emps = sorted({e["empresa"] for e in _ex})
+    _emp_f = _f1.selectbox("Empresa", ["Todas"] + _emps, key="ex_emp")
+    _so_vig = _f2.checkbox("Só em vigor", value=True, key="ex_vig",
+                           help="Exclui encerrados, rescindidos e vencidos")
+    _so_alerta = _f3.checkbox("Só com alerta de cadastro", value=False, key="ex_alerta")
+    _rows = [e for e in _ex
+             if (_emp_f == "Todas" or e["empresa"] == _emp_f)
+             and (not _so_vig or e["status"] not in ("ENCERRADO", "RESCINDIDO", "VENCIDO"))
+             and (not _so_alerta or e["alertas"])]
+    _k1, _k2, _k3, _k4, _k5 = st.columns(5)
+    _k1.metric("Contratado", brl(sum(r["contratado"] for r in _rows)), f"{len(_rows)} contratos", delta_color="off")
+    _k2.metric("Faturado (parcelas)", brl(sum(r["faturado"] for r in _rows)), delta_color="off")
+    _k3.metric("A faturar (parcelas)", brl(sum(r["a_faturar"] for r in _rows)), delta_color="off")
+    _k4.metric("Saldo a faturar", brl(sum(r["saldo_a_faturar"] or 0 for r in _rows)),
+               "contratado − faturado", delta_color="off")
+    _k5.metric("Com alerta de cadastro", sum(1 for r in _rows if r["alertas"]), delta_color="off")
+    if _rows:
+        _df_ex = pd.DataFrame(_rows)
+        _df_ex["% faturado"] = _df_ex["pct_faturado"].apply(lambda v: "—" if v is None else f"{v:.0f}%")
+        _df_ex["Término"] = pd.to_datetime(_df_ex["termino"], errors="coerce").dt.strftime("%d/%m/%Y").fillna("—")
+        _df_ex["Alertas"] = _df_ex["alertas"].apply(lambda a: " · ".join(a))
+        _df_ex["saldo_a_faturar"] = _df_ex["saldo_a_faturar"].fillna(0.0)
+        _show = _df_ex[["contrato", "empresa", "status", "Término", "contratado", "faturado",
+                        "a_faturar", "saldo_a_faturar", "% faturado", "n_parcelas", "Alertas"]].rename(columns={
+            "contrato": "Contrato", "empresa": "Empresa", "status": "Status",
+            "contratado": "Contratado", "faturado": "Faturado", "a_faturar": "A faturar",
+            "saldo_a_faturar": "Saldo a faturar", "n_parcelas": "Parcelas"})
+        _xls = io.BytesIO()
+        with pd.ExcelWriter(_xls, engine="openpyxl") as _w:
+            _show.to_excel(_w, index=False, sheet_name="Execucao")
+        for _c in ("Contratado", "Faturado", "A faturar", "Saldo a faturar"):
+            _show[_c] = _show[_c].apply(brl)
+        st.dataframe(_show, hide_index=True, use_container_width=True)
+        st.download_button("📥 Excel", _xls.getvalue(), file_name=f"contratos_execucao_{date.today():%Y%m%d}.xlsx",
+                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                           key="ex_dl")
+    else:
+        st.info("Nenhum contrato com esses filtros.")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PAINEL

@@ -89,3 +89,58 @@ def test_paginas_abrem_sem_erro(pagina, monkeypatch, tmp_path):
     at = _logado(AppTest.from_file(os.path.join(RAIZ, "pages", pagina), default_timeout=60)).run()
     assert not at.exception, [e.value for e in at.exception]
     assert not [w for w in at.warning if "não foi possível consultar" in w.value]
+
+
+# ── Fase 2 ─────────────────────────────────────────────────────────────────────
+from datetime import date as _date, timedelta as _td
+
+_CTRS = [{"id": 1, "contratante": "Cliente Teste", "empresa_gg": "GG PESQUISA", "nome_contrato": "Teste",
+          "valor_total": 300.0, "data_termino": "2027-12-31", "status_real": "ATIVO", "status": "ATIVO",
+          "tipo_contrato": "P&D", "categoria": "Outro", "data_inicio": "2026-01-01", "moeda": "BRL",
+          "servico_principal": "", "data_assinatura": "2026-01-01", "valor_recorrente": 0.0,
+          "internacional": 0, "white_label": 0, "recorrente": 0, "renovacao_automatica": 0,
+          "observacoes": "", "cnpj": "", "pais": "Brasil", "cliente_id": None, "total_parcelas": 2,
+          "valor_parcela": 0.0, "responsavel_interno": "", "aviso_previo_dias": None}]
+
+
+def _parcelas():
+    d = (_date.today() + _td(days=10)).isoformat()
+    return [{"id": 1, "contrato_id": 1, "numero": 1, "data_emissao": d, "valor": 123.45,
+             "saldo_atual": 0, "situacao": "EM ESPERA", "numero_nf": None},
+            {"id": 2, "contrato_id": 1, "numero": 2, "data_emissao": d, "valor": 100.0,
+             "saldo_atual": 0, "situacao": "FATURADO", "numero_nf": "77"}]
+
+
+def test_fluxo_usa_parcelas_do_banco_e_mostra_projecao(monkeypatch):
+    import utils, db_contratos
+    import streamlit as st
+    utils._estado_integracoes.clear(); st.cache_data.clear()
+    monkeypatch.setattr(utils, "get_bling_connection_error", lambda: "não conectado (teste)")
+    monkeypatch.setattr(utils, "get_clients", lambda: {n: FakeEgCompleto() for n in utils.NOMES})
+    monkeypatch.setattr(db_contratos, "list_contratos", lambda *a, **k: _CTRS)
+    monkeypatch.setattr(db_contratos, "list_parcelas", lambda *a, **k: _parcelas())
+    at = _logado(AppTest.from_file(os.path.join(RAIZ, "pages", "8_Fluxo.py"), default_timeout=60)).run()
+    assert not at.exception, [e.value for e in at.exception]
+    html = " ".join(m.value for m in at.markdown)
+    assert "Projeção — próximas 13 semanas" in html
+    assert "123,45" in html          # só a parcela pendente entra; a faturada (100) não
+    assert "parcelas a faturar" in html
+
+
+def test_contratos_aba_execucao(monkeypatch):
+    import db_contratos, db_creditos
+    monkeypatch.setattr(db_contratos, "list_contratos", lambda *a, **k: _CTRS)
+    monkeypatch.setattr(db_contratos, "list_parcelas", lambda *a, **k: _parcelas())
+    monkeypatch.setattr(db_contratos, "list_aditivos", lambda *a, **k: [])
+    monkeypatch.setattr(db_contratos, "resumo_contratos", lambda *a, **k: {
+        "qtd_ativos": 1, "qtd_vencidos": 0, "qtd_vencendo_30": 0, "qtd_vencendo_60": 0,
+        "qtd_vencendo_90": 0, "qtd_encerrados": 0, "qtd_renovacao_auto": 0, "qtd_internacionais": 0,
+        "qtd_white_label": 0, "qtd_recorrentes": 0, "receita_recorrente": 0.0,
+        "valor_total_ativo": 300.0, "todos": _CTRS})
+    monkeypatch.setattr(db_creditos, "list_clientes", lambda *a, **k: [])
+    monkeypatch.setattr(db_creditos, "list_creditos", lambda *a, **k: [])
+    at = _logado(AppTest.from_file(os.path.join(RAIZ, "pages", "7_Contratos.py"), default_timeout=60)).run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert "📈 Execução" in [t.label for t in at.tabs]
+    vals = {m.label: m.value for m in at.metric}
+    assert "123,45" in vals["A faturar (parcelas)"] and "100,00" in vals["Faturado (parcelas)"]

@@ -14,6 +14,7 @@ import io
 from datetime import date, timedelta
 
 import pandas as pd
+import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
@@ -393,6 +394,44 @@ else:
     kpi_card(col2, "📋", "Lançamentos",         str(len(df_periodo)), f"{brl(media_dia)} / dia em média")
     kpi_card(col3, "🏷️", "Maior Grupo",        top_cat[:28] + ("…" if len(top_cat) > 28 else ""), brl(top_val))
     kpi_card(col4, "🗓️", "Mês Atual (ref.)",   brl(val_mes_atual), f"{MESES_PT[today.month]}/{today.year}")
+
+st.markdown("<div style='margin-top:28px'></div>", unsafe_allow_html=True)
+
+# ── Entradas × Saídas realizadas (Fase 2, regime de caixa pelo ERP) ──────────
+st.markdown('<div class="section-title">⚖️ Entradas × Saídas realizadas — eGestor</div>', unsafe_allow_html=True)
+st.caption(
+    "Regime de **caixa** pelo ERP: entradas = recebimentos baixados no eGestor e saídas = pagamentos "
+    "baixados, ambos pela **data de pagamento**, no período selecionado. Não é lucro nem DRE, e não "
+    "inclui o banco (ainda não integrado). A GoGenetic You fica de fora porque, no Bling, o "
+    "\"recebido\" hoje é filtrado por vencimento — não é comparável."
+)
+if empresas_egestor:
+    from utils import load_companies_data as _lcd
+    _ent_map = _lcd(empresas_egestor, dt_ini_str, dt_fim_str)
+    _ent = [{"empresa": n, "data": (r.get("dtPgto") or "")[:10], "valor": float(r.get("valor") or 0)}
+            for n in empresas_egestor for r in _ent_map[n]["faturamento"]]
+    _sai = [{"empresa": r.get("_empresa"), "data": (r.get("dtPgto") or "")[:10],
+             "valor": float(r.get("valor") or 0)}
+            for r in periodo_raw if r.get("_empresa") in empresas_egestor]
+    _te, _ts = sum(x["valor"] for x in _ent), sum(x["valor"] for x in _sai)
+    _c1, _c2, _c3 = st.columns(3)
+    kpi_card(_c1, "📥", "Entradas realizadas", brl(_te), f"{len(_ent)} recebimentos", border="#10B981")
+    kpi_card(_c2, "📤", "Saídas realizadas", brl(_ts), f"{len(_sai)} pagamentos", border="#EF4444")
+    kpi_card(_c3, "⚖️", "Resultado de caixa", brl(_te - _ts), "entradas − saídas (ERP)",
+             border="#7E16B8", value_class="kpi-positive" if _te >= _ts else "kpi-negative")
+    _df_es = pd.DataFrame([{**x, "tipo": "Entradas"} for x in _ent] + [{**x, "tipo": "Saídas"} for x in _sai])
+    if not _df_es.empty:
+        _df_es["data"] = pd.to_datetime(_df_es["data"], errors="coerce")
+        _df_es = _df_es.dropna(subset=["data"])
+        _df_es["Mês"] = _df_es["data"].dt.to_period("M").astype(str)
+        _g = _df_es.groupby(["Mês", "tipo"])["valor"].sum().reset_index()
+        _fig_es = px.bar(_g, x="Mês", y="valor", color="tipo", barmode="group",
+                         labels={"valor": "R$", "tipo": ""},
+                         color_discrete_map={"Entradas": "#10B981", "Saídas": "#EF4444"})
+        plotly_layout(_fig_es)
+        st.plotly_chart(_fig_es, use_container_width=True)
+else:
+    st.info("Selecione uma empresa do eGestor para ver entradas × saídas.")
 
 st.markdown("<div style='margin-top:28px'></div>", unsafe_allow_html=True)
 

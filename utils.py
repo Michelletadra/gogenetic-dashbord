@@ -515,6 +515,10 @@ import threading as _threading
 import time as _time
 import logging as _logging
 from datetime import datetime as _datetime
+from zoneinfo import ZoneInfo as _ZoneInfo
+
+# Horário mostrado ao usuário: sempre Brasília (o Streamlit Cloud roda em UTC).
+_FUSO_BR = _ZoneInfo("America/Sao_Paulo")
 
 _log_int = _logging.getLogger("integracoes")
 ESPERA_APOS_FALHA = 30   # s — evita martelar uma API fora do ar a cada rerun
@@ -542,7 +546,7 @@ def _executar(empresa: str, chave: str, fn, vazio):
             est["status"][k] = {"erro": msg, "quando": _time.time(),
                                 "ultimo_ok_em": ultimo["em"] if ultimo else None}
         return _copy.deepcopy(ultimo["dados"] if ultimo else vazio)
-    agora = _datetime.now()
+    agora = _datetime.now(_FUSO_BR)
     with est["lock"]:
         est["status"][k] = {"erro": None, "quando": _time.time(), "ultimo_ok_em": agora}
         est["ultimo_ok"][k] = {"dados": _copy.deepcopy(dados), "em": agora}
