@@ -36,7 +36,8 @@ def test_parcelas_como_fluxo_filtra_periodo_e_separa_problemas():
         {"contrato_id": 1, "numero": 4, "data_emissao": None, "valor": 50, "situacao": "EM ESPERA"},
         {"contrato_id": 1, "numero": 5, "data_emissao": "2026-10-28", "valor": 70, "situacao": "??"},
         {"contrato_id": 1, "numero": 6, "data_emissao": "30/10/2026", "valor": 10, "situacao": ""},
-        {"contrato_id": 1, "numero": 7, "data_emissao": None, "valor": 0, "situacao": "EM ESPERA"},  # marcador
+        {"contrato_id": 1, "numero": 7, "data_emissao": None, "valor": 0, "situacao": "EM ESPERA",
+         "saldo_atual": 53280.15},  # marcador real: saldo corrido não é valor da parcela
     ]
     r = parcelas_como_fluxo(parc, ctrs, HOJE, date(2026, 11, 30))
     assert sorted(p["valor"] for p in r["no_periodo"]) == [10.0, 100.0]
@@ -84,3 +85,22 @@ def test_execucao_contratos_alertas():
     b = ex[2]
     assert set(b["alertas"]) >= {"valor total não informado", "sem data de término", "sem parcelas cadastradas"}
     assert b["pct_faturado"] is None
+
+
+def test_execucao_saldo_a_faturar_com_marcadores_reais():
+    # caso real (contrato NTRO 1000, homologação): 7 faturadas, 5 em espera com valor 0
+    ctrs = [{"id": 2, "contratante": "NTRO 1000", "valor_total": 127872.36,
+             "data_termino": "08/08/2026", "status_real": "ATIVO"}]
+    parc = ([{"contrato_id": 2, "valor": 10656.03, "situacao": "FATURADO", "numero_nf": str(380 + i)}
+             for i in range(7)] +
+            [{"contrato_id": 2, "valor": 0, "saldo_atual": 53280.15, "situacao": "EM ESPERA"}
+             for _ in range(5)])
+    e = execucao_contratos(ctrs, parc)[0]
+    assert round(e["faturado"], 2) == 74592.21
+    assert e["a_faturar"] == 0
+    assert round(e["saldo_a_faturar"], 2) == 53280.15
+    assert "5 parcela(s) em espera sem valor/data" in e["alertas"]
+    assert "parcelas ≠ valor total" not in e["alertas"]
+    # e nada disso entra no Fluxo como receita
+    r = parcelas_como_fluxo(parc, ctrs, HOJE, date(2027, 12, 31))
+    assert r == {"no_periodo": [], "sem_data": [], "nao_classificadas": []}
