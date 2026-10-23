@@ -74,7 +74,9 @@ def parcelas_como_fluxo(parcelas: Iterable[dict], contratos: Iterable[dict],
             continue
         c = por_id.get(p.get("contrato_id"), {})
         dt = _data(p.get("data_emissao"))
-        valor = _num(p.get("saldo_atual")) or _num(p.get("valor"))
+        # `valor` é o valor da parcela. `saldo_atual` é o saldo corrido do
+        # contrato depois da parcela (não é valor a receber) — não usar aqui.
+        valor = _num(p.get("valor"))
         item = {
             "valor": valor,
             "dtVenc": dt.isoformat() if dt else "",
@@ -158,7 +160,8 @@ def pior_semana(linhas: list[dict]) -> Optional[dict]:
 # ── Execução de contratos (com os dados já existentes) ─────────────────────────
 def execucao_contratos(contratos: Iterable[dict], parcelas: Iterable[dict]) -> list[dict]:
     """Por contrato: valor contratado, parcelado, faturado (parcelas com NF ou
-    situação de faturada), a faturar (parcelas pendentes) e alertas de cadastro.
+    situação de faturada), a faturar (parcelas pendentes com valor), saldo a
+    faturar (contratado − faturado, quando há valor total) e alertas de cadastro.
     Não usa OS nem recebimentos do ERP — o vínculo contrato↔OS não existe no
     cadastro hoje; isso é dito na tela."""
     por_contrato: dict = {}
@@ -169,11 +172,14 @@ def execucao_contratos(contratos: Iterable[dict], parcelas: Iterable[dict]) -> l
         ps = por_contrato.get(c.get("id"), [])
         contratado = _num(c.get("valor_total"))
         parcelado = faturado = a_faturar = nao_class = 0.0
+        pend_sem_valor = 0
         for p in ps:
             v = _num(p.get("valor"))
             classe = classificar_parcela(p)
             if classe == CANCELADA:
                 continue
+            if classe == PENDENTE and v == 0:
+                pend_sem_valor += 1
             parcelado += v
             if classe == FATURADA:
                 faturado += v
@@ -186,12 +192,15 @@ def execucao_contratos(contratos: Iterable[dict], parcelas: Iterable[dict]) -> l
             alertas.append("valor total não informado")
         if not c.get("data_termino"):
             alertas.append("sem data de término")
-        if ps and contratado > 0 and abs(parcelado - contratado) > 0.01:
+        if ps and contratado > 0 and not pend_sem_valor and abs(parcelado - contratado) > 0.01:
             alertas.append("parcelas ≠ valor total")
         if not ps:
             alertas.append("sem parcelas cadastradas")
         if nao_class:
             alertas.append("parcela com situação não reconhecida")
+        saldo = max(contratado - faturado, 0.0) if contratado > 0 else None
+        if pend_sem_valor and saldo:
+            alertas.append(f"{pend_sem_valor} parcela(s) em espera sem valor/data")
         out.append({
             "id": c.get("id"),
             "contrato": c.get("nome_contrato") or c.get("contratante") or "—",
@@ -203,6 +212,7 @@ def execucao_contratos(contratos: Iterable[dict], parcelas: Iterable[dict]) -> l
             "parcelado": parcelado,
             "faturado": faturado,
             "a_faturar": a_faturar,
+            "saldo_a_faturar": saldo,
             "nao_classificado": nao_class,
             "pct_faturado": (faturado / contratado * 100) if contratado > 0 else None,
             "n_parcelas": len(ps),
