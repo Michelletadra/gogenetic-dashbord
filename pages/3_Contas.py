@@ -11,7 +11,8 @@ from utils import (mostrar_avisos_integracao, GLOBAL_CSS, BRAND, NOMES, NOME_YOU
                    get_empresas_disponiveis, load_data_unificado,
                    load_vencidas_unificado,
                    load_companies_data, load_companies_vencidas,
-                   tabela_marcavel)
+                   tabela_marcavel, load_plano_contas)
+import impostos as _imp
 
 def _parse_recebimento_desc(descricao: str) -> dict:
     """Extrai NF, código do serviço/venda e parcela do texto que o eGestor
@@ -116,12 +117,24 @@ with st.spinner("Carregando contas..."):
 total_receb = soma(recebidos, "valor")
 
 total_rec = soma(contas_rec, "valor")
-total_pag = soma(contas_pag, "valor")
+total_pag = soma(contas_pag, "valor")          # total (com impostos): base do Saldo Previsto
 saldo     = total_rec - total_pag
 total_vr  = soma(venc_rec, "valor")
-total_vp  = soma(venc_pag, "valor")
+
+# Impostos separados pelo plano de contas do eGestor (grupo "Impostos").
+_planos = {n: load_plano_contas(n) for n in empresas_ativas if n != NOME_YOU}
+_sem_plano = [n for n, p in _planos.items() if not p]
+_info = {n: _imp.plano_info(p) for n, p in _planos.items()}
+contas_pag, imp_pag  = _imp.separar(contas_pag, _info)
+venc_pag,   imp_venc = _imp.separar(venc_pag, _info)
+total_pag_op = soma(contas_pag, "valor")
+total_vp     = soma(venc_pag, "valor")
+total_imp_pag, total_imp_venc = soma(imp_pag, "valor"), soma(imp_venc, "valor")
 
 mostrar_avisos_integracao(empresas_ativas)
+if _sem_plano:
+    st.warning("⚠️ Não foi possível ler o plano de contas de " + ", ".join(_sem_plano) +
+               " — os impostos dessas empresas podem estar misturados em A Pagar.")
 
 # ── Header ─────────────────────────────────────────────────────────────────────
 empresa_label = empresas_ativas[0] if len(empresas_ativas) == 1 else "Grupo GoGenetic"
@@ -165,14 +178,16 @@ with btn_cols[2]:
 st.markdown("")
 
 # ── KPIs ───────────────────────────────────────────────────────────────────────
-c1, c2, c3, c4, c5 = st.columns(5)
+c1, c2, c6, c3, c4, c5 = st.columns(6)
 kpi_card(c1, "📥", "A Receber",      brl(total_rec), f"{len(contas_rec)} títulos", border="rgba(36,183,140,0.3)")
-kpi_card(c2, "📤", "A Pagar",        brl(total_pag), f"{len(contas_pag)} títulos", border="rgba(255,103,47,0.3)")
-kpi_card(c3, "📈", "Saldo Previsto", brl(abs(saldo)), "Receber − Pagar",
+kpi_card(c2, "📤", "A Pagar",        brl(total_pag_op), f"{len(contas_pag)} títulos · sem impostos", border="rgba(255,103,47,0.3)")
+kpi_card(c6, "🧾", "Impostos",       brl(total_imp_pag), f"{len(imp_pag)} a vencer · {brl(total_imp_venc)} em atraso",
+         border="rgba(126,22,184,0.3)")
+kpi_card(c3, "📈", "Saldo Previsto", brl(abs(saldo)), "Receber − Pagar (com impostos)",
          border="rgba(36,183,140,0.4)" if saldo >= 0 else "rgba(255,103,47,0.4)",
          value_class="kpi-positive" if saldo >= 0 else "kpi-negative")
 kpi_card(c4, "⚠️", "Vencido a Rec.", brl(total_vr), f"{len(venc_rec)} títulos", border="rgba(245,166,35,0.4)", value_class="kpi-warn" if total_vr > 0 else "")
-kpi_card(c5, "🚨", "Vencido a Pag.", brl(total_vp), f"{len(venc_pag)} títulos", border="rgba(255,103,47,0.4)", value_class="kpi-negative" if total_vp > 0 else "")
+kpi_card(c5, "🚨", "Vencido a Pag.", brl(total_vp), f"{len(venc_pag)} títulos · sem impostos", border="rgba(255,103,47,0.4)", value_class="kpi-negative" if total_vp > 0 else "")
 
 # ── Gráfico por mês ────────────────────────────────────────────────────────────
 def df_mensal(items, campo_data, label):
@@ -187,12 +202,13 @@ def df_mensal(items, campo_data, label):
     return g
 
 df_fl = pd.concat([df_mensal(contas_rec, "dtVenc", "A Receber"),
-                   df_mensal(contas_pag, "dtVenc", "A Pagar")])
+                   df_mensal(contas_pag, "dtVenc", "A Pagar"),
+                   df_mensal(imp_pag, "dtVenc", "Impostos")])
 
 if not df_fl.empty:
     st.markdown("<div class='section-title'>Fluxo por Mês de Vencimento</div>", unsafe_allow_html=True)
     fig = px.bar(df_fl, x="mes", y="valor", color="tipo", barmode="group",
-                 color_discrete_map={"A Receber": "#24B78C", "A Pagar": "#FF672F"},
+                 color_discrete_map={"A Receber": "#24B78C", "A Pagar": "#FF672F", "Impostos": "#7E16B8"},
                  labels={"mes": "", "valor": "R$", "tipo": ""})
     plotly_layout(fig)
     st.plotly_chart(fig, use_container_width=True)
@@ -202,10 +218,11 @@ st.markdown("<div class='section-title'>Detalhamento — selecione linhas para s
             unsafe_allow_html=True)
 st.caption("💡 Clique nas linhas para selecioná-las. O total e o botão de exportação aparecem abaixo.")
 
-tab_rec, tab_pag, tab_venc, tab_recebido = st.tabs([
+tab_rec, tab_pag, tab_venc, tab_imp, tab_recebido = st.tabs([
     f"📥 A Receber ({len(contas_rec)})",
     f"📤 A Pagar ({len(contas_pag)})",
     f"⚠️ Vencidos ({len(venc_rec) + len(venc_pag)})",
+    f"🧾 Impostos ({len(imp_pag) + len(imp_venc)})",
     f"✅ Recebido ({len(recebidos)})",
 ])
 
@@ -353,3 +370,31 @@ with tab_venc:
         )
     else:
         st.success("Nenhum pagamento em atraso! ✅")
+
+
+with tab_imp:
+    st.caption("Títulos cuja conta no plano de contas do eGestor está no grupo **Impostos**. "
+               "Eles saíram de A Pagar e de Vencidos para não misturar, mas continuam no "
+               "Saldo Previsto. GoGenetic You (Bling) não tem essa classificação.")
+    st.markdown("#### 🧾 A vencer no período")
+    tabela_interativa(
+        sorted(imp_pag, key=lambda x: str(x.get("dtVenc") or "")),
+        {"empresa": "Empresa", "dtVenc": "Vencimento", "tipo_imposto": "Imposto",
+         "nomeContato": "Fornecedor", "valor": "Valor", "descricao": "Descrição"},
+        nome_arquivo="impostos_a_pagar",
+    )
+    st.markdown("#### 🚨 Em atraso")
+    if imp_venc:
+        df_iv = pd.DataFrame(imp_venc)
+        df_iv["dtVenc"] = pd.to_datetime(df_iv["dtVenc"], errors="coerce")
+        df_iv["Atraso"] = df_iv["dtVenc"].apply(
+            lambda d: f"{(pd.Timestamp.today()-d).days} dias" if pd.notna(d) else "")
+        df_iv = df_iv.sort_values("dtVenc")
+        tabela_interativa(
+            df_iv.to_dict("records"),
+            {"empresa": "Empresa", "dtVenc": "Vencimento", "tipo_imposto": "Imposto",
+             "nomeContato": "Fornecedor", "valor": "Valor", "Atraso": "Atraso"},
+            nome_arquivo="impostos_vencidos",
+        )
+    else:
+        st.success("Nenhum imposto em atraso! ✅")

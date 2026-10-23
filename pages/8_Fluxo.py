@@ -15,6 +15,8 @@ from utils import (mostrar_avisos_integracao, GLOBAL_CSS, BRAND, brl, soma, kpi_
                    load_companies_data, load_companies_vencidas,
                    tabela_marcavel)
 from fluxo_regras import parcelas_como_fluxo, projecao_semanal, pior_semana
+import impostos as _imp
+from utils import load_plano_contas, NOME_YOU
 
 CONTRATOS_XLS  = Path(__file__).parent.parent / "data" / "contratos.xlsx"
 CONTRATOS_JSON = Path(__file__).parent.parent / "data" / "contratos_manual.json"
@@ -336,11 +338,16 @@ if len(empresas_ativas) > 1 and not df_rec.empty:
 # ── Tabelas ────────────────────────────────────────────────────────────────────
 n_egst  = len(rec_items) - len(parcelas_periodo)
 n_contr = len(parcelas_periodo)
-tab_rec_t, tab_contr_t, tab_pag_t, tab_venc_t = st.tabs([
+# Impostos (grupo "Impostos" do plano de contas) só nas tabelas; totais e projeção seguem completos.
+_info_imp = {n: _imp.plano_info(load_plano_contas(n)) for n in empresas_ativas if n != NOME_YOU}
+pag_tab, imp_pag_t   = _imp.separar(pag_items, _info_imp)
+vpag_tab, imp_venc_t = _imp.separar(venc_pag, _info_imp)
+tab_rec_t, tab_contr_t, tab_pag_t, tab_venc_t, tab_imp_t = st.tabs([
     f"📥 A Receber eGestor ({n_egst})",
     f"📋 Contratos a Faturar ({n_contr})",
-    f"📤 A Pagar ({len(pag_items)})",
-    f"⚠️ Vencidos ({len(venc_rec) + len(venc_pag)})",
+    f"📤 A Pagar ({len(pag_tab)})",
+    f"⚠️ Vencidos ({len(venc_rec) + len(vpag_tab)})",
+    f"🧾 Impostos ({len(imp_pag_t) + len(imp_venc_t)})",
 ])
 
 COLS_REC = {"empresa": "Empresa", "dtVenc": "Vencimento", "nomeContato": "Cliente",
@@ -425,10 +432,20 @@ with tab_contr_t:
             st.dataframe(_dx, hide_index=True, use_container_width=True)
 
 with tab_pag_t:
-    tabela_fluxo(pag_items, COLS_PAG, "pagar")
+    tabela_fluxo(pag_tab, COLS_PAG, "pagar")
 
 with tab_venc_t:
     st.markdown("#### 📥 Vencidos a Receber")
     tabela_fluxo(venc_rec, COLS_REC, "venc_rec")
     st.markdown("#### 📤 Vencidos a Pagar")
-    tabela_fluxo(venc_pag, COLS_PAG, "venc_pag")
+    tabela_fluxo(vpag_tab, COLS_PAG, "venc_pag")
+
+with tab_imp_t:
+    st.caption("Títulos do grupo **Impostos** do plano de contas do eGestor, separados das "
+               "tabelas A Pagar e Vencidos. Continuam nos cartões e na projeção.")
+    COLS_IMP = {"empresa": "Empresa", "dtVenc": "Vencimento", "tipo_imposto": "Imposto",
+                "nomeContato": "Fornecedor", "valor": "Valor", "descricao": "Descrição"}
+    st.markdown("#### 🧾 A vencer no horizonte")
+    tabela_fluxo(imp_pag_t, COLS_IMP, "imp_pag")
+    st.markdown("#### 🚨 Em atraso")
+    tabela_fluxo(imp_venc_t, COLS_IMP, "imp_venc")
